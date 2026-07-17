@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Dispatch Capture",
+  "version": "0.1.0",
+  "description": "Right-click a selected order ID to send it straight to a warehouse's dispatch queue.",
+  "permissions": ["contextMenus", "storage"],
+  "host_permissions": ["https://*.supabase.co/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

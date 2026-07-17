@@ -1,0 +1,315 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap");
+
+:root {
+  --bg: #f4f3ef;
+  --surface: #ffffff;
+  --surface-sunken: #ebe9e3;
+  --ink: #1c1e1f;
+  --ink-secondary: #6a6d68;
+  --ink-muted: #9a9c96;
+  --border: #dedad2;
+  --border-strong: #c7c2b6;
+  --accent: #d9560f;
+  --accent-ink: #ffffff;
+  --accent-tint: #fbe4d3;
+  --success: #2f7a4d;
+  --success-tint: #e1efe4;
+  --danger: #b8342a;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-body: "Inter", -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --radius: 8px;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+input,
+button,
+select {
+  font-family: inherit;
+  font-size: 14px;
+}
+
+button {
+  cursor: pointer;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  font-weight: 500;
+  transition: background 0.12s ease, transform 0.05s ease;
+}
+button:hover {
+  background: var(--surface-sunken);
+}
+button:active {
+  transform: scale(0.98);
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+button.primary:hover {
+  background: #c04c0c;
+}
+button.ghost {
+  border-color: transparent;
+  background: transparent;
+}
+button.ghost:hover {
+  background: var(--surface-sunken);
+}
+
+input[type="text"],
+select {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--ink);
+}
+input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+/* ---------------- App shell ---------------- */
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.topbar .brand {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.topbar .brand span.tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-muted);
+  border: 1px solid var(--border-strong);
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0;
+}
+
+.topbar .who {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+
+main.container {
+  max-width: 920px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 24px 28px 64px;
+  flex: 1;
+}
+
+/* ---------------- Warehouse tabs ---------------- */
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+  overflow-x: auto;
+}
+.tab {
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-secondary);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.tab.add-warehouse {
+  margin-left: auto;
+  color: var(--ink-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ---------------- Date group card ---------------- */
+
+.date-group {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+.date-group.today {
+  border-color: var(--accent);
+}
+.date-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.date-group-head .title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.date-group-head .title h3 {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+.date-group-head .title .count {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.date-group-head .actions {
+  display: flex;
+  gap: 8px;
+}
+.date-group-head .actions button {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.order-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  background: var(--surface-sunken);
+  border-radius: var(--radius);
+}
+.order-row .order-id {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+.order-row.done .order-id {
+  text-decoration: line-through;
+  color: var(--ink-muted);
+}
+.order-row .time {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.order-row .added-by {
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+/* ---------------- Manual add bar ---------------- */
+
+.manual-add {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+.manual-add input {
+  flex: 1;
+}
+
+/* ---------------- Auth screen ---------------- */
+
+.auth-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--accent-tint) 0px,
+    var(--accent-tint) 12px,
+    transparent 12px,
+    transparent 26px
+  );
+}
+.auth-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px;
+  width: 320px;
+}
+.auth-card h1 {
+  font-family: var(--font-display);
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+.auth-card p.sub {
+  margin: 0 0 20px;
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+.auth-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.auth-card .error {
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.empty-note {
+  font-size: 13px;
+  color: var(--ink-muted);
+  padding: 24px 0;
+  text-align: center;
+}
+
+.badge-admin {
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--accent-tint);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 100px;
+}

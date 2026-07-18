@@ -267,6 +267,7 @@ function renderDateGroups(root, session) {
                 <input type="checkbox" data-id="${o.id}" ${o.done ? "checked" : ""} ${canEdit ? "" : "disabled"} />
                 <span class="order-id">${escapeHtml(o.order_id)}</span>
                 <span class="time">${formatTime(o.created_at)}</span>
+                ${profile.role === "super_admin" ? `<button class="ghost delete-order" data-id="${o.id}" title="Delete order">✕</button>` : ""}
               </div>`
               )
               .join("")}
@@ -274,7 +275,17 @@ function renderDateGroups(root, session) {
         </div>`;
     })
     .join("");
-
+  container.querySelectorAll(".delete-order").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Delete this order? This can't be undone.")) return;
+      const { error } = await supabase.from("orders").delete().eq("id", btn.dataset.id);
+      if (error) {
+        alert(`Couldn't delete order: ${error.message}`);
+        return;
+      }
+      await loadOrdersForActiveWarehouse(root, session);
+    });
+  });
   container.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
     cb.addEventListener("change", async () => {
       const { error } = await supabase

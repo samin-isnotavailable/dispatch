@@ -4,7 +4,7 @@ export function renderAuthScreen(root) {
   root.innerHTML = `
     <div class="auth-screen">
       <div class="auth-card">
-        <h1>Dispatch tracker</h1>
+        <h1>Dispatch<span style="color:var(--accent)">EZ</span></h1>
         <p class="sub">Sign in with the account your admin set up for you.</p>
         <form id="login-form">
           <input type="text" id="email" placeholder="name@company.com" autocomplete="username" required />

@@ -14,7 +14,7 @@ async function rebuildMenu() {
     const res = await authedFetch("/rest/v1/warehouses?select=id,name&order=name.asc");
     if (res.ok) warehouses = await res.json();
   } catch (e) {
-    console.error("Dispatch Capture: couldn't load warehouses", e);
+    console.error("DispatchEZ Capture: couldn't load warehouses", e);
     return;
   }
   if (!warehouses.length) return;
@@ -76,7 +76,7 @@ chrome.contextMenus.onClicked.addListener(async (info) => {
     chrome.action.setBadgeText({ text: "✓" });
     setTimeout(() => chrome.action.setBadgeText({ text: "" }), 1500);
   } catch (e) {
-    console.error("Dispatch Capture: failed to save order", e);
+    console.error("DispatchEZ Capture: failed to save order", e);
     chrome.action.setBadgeText({ text: "!" });
     chrome.action.setBadgeBackgroundColor({ color: "#b8342a" });
     setTimeout(() => chrome.action.setBadgeText({ text: "" }), 2500);

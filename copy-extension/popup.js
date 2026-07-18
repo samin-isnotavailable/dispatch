@@ -7,7 +7,7 @@ async function render() {
   if (session) {
     app.innerHTML = `
       <div class="signed-in">
-        <h1>Dispatch Capture</h1>
+        <h1>Dispatch<span class="tag">EZ</span> Capture</h1>
         <p>Signed in as <strong>${session.user_email}</strong></p>
         <button id="signout">Sign out</button>
         <p class="hint">Select an order ID on any page, right-click, and choose "Send to warehouse".</p>

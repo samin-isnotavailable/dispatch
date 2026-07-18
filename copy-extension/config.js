@@ -1,0 +1,4 @@
+// Fill these in with the same values you used in the dashboard's .env
+// (VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY).
+export const SUPABASE_URL = "https://jlnvdoznmiyzzkfxwtjk.supabase.co";
+export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpsbnZkb3pubWl5enprZnh3dGprIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyMjM1MzUsImV4cCI6MjA5OTc5OTUzNX0.2sHdQwB5Gc0X565ay-L1n4OdAkFRk_8T-Mt16zNEm1M";

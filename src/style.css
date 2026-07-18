@@ -1,25 +1,36 @@
-@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap");
 
 :root {
-  --bg: #f4f3ef;
-  --surface: #ffffff;
-  --surface-sunken: #ebe9e3;
-  --ink: #1c1e1f;
-  --ink-secondary: #6a6d68;
-  --ink-muted: #9a9c96;
-  --border: #dedad2;
-  --border-strong: #c7c2b6;
-  --accent: #d9560f;
+  /* Navy surface scale — from brand color inspo */
+  --bg: #0d1626;
+  --surface: #152238;
+  --surface-2: #1c2e4a;
+  --surface-3: #23395d;
+  --border: #263c60;
+  --border-strong: #33517d;
+
+  --ink: #eef2f8;
+  --ink-secondary: #a6b3c9;
+  --ink-muted: #6d7d99;
+
+  /* Blue-violet accent — from gradient color inspo */
+  --accent: #6C63FF;
+  --accent-hover: #7d75ff;
   --accent-ink: #ffffff;
-  --accent-tint: #fbe4d3;
-  --success: #2f7a4d;
-  --success-tint: #e1efe4;
-  --danger: #b8342a;
-  --font-display: "Space Grotesk", sans-serif;
-  --font-body: "Inter", -apple-system, sans-serif;
+  --accent-tint: rgba(108, 99, 255, 0.14);
+
+  /* Azure secondary — same gradient family, used sparingly */
+  --azure: #23a6d5;
+
+  --success: #34c77b;
+  --success-tint: rgba(52, 199, 123, 0.14);
+  --danger: #ff6b6b;
+
+  --font-display: "Inter Tight", sans-serif;
+  --font-body: "Inter Tight", -apple-system, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --radius: 8px;
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 * {
@@ -37,7 +48,8 @@ body {
 
 input,
 button,
-select {
+select,
+textarea {
   font-family: inherit;
   font-size: 14px;
 }
@@ -45,15 +57,16 @@ select {
 button {
   cursor: pointer;
   border: 1px solid var(--border-strong);
-  background: var(--surface);
+  background: var(--surface-2);
   color: var(--ink);
   border-radius: var(--radius);
   padding: 8px 14px;
   font-weight: 500;
-  transition: background 0.12s ease, transform 0.05s ease;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.05s ease;
 }
 button:hover {
-  background: var(--surface-sunken);
+  background: var(--surface-3);
+  border-color: var(--accent);
 }
 button:active {
   transform: scale(0.98);
@@ -64,23 +77,40 @@ button.primary {
   color: var(--accent-ink);
 }
 button.primary:hover {
-  background: #c04c0c;
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 button.ghost {
   border-color: transparent;
   background: transparent;
 }
 button.ghost:hover {
-  background: var(--surface-sunken);
+  background: var(--surface-2);
+  border-color: transparent;
 }
 
 input[type="text"],
-select {
+input[type="password"],
+select,
+textarea {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   padding: 8px 10px;
   background: var(--surface);
   color: var(--ink);
+}
+input[type="text"]:focus,
+input[type="password"]:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+input[type="text"]::placeholder,
+input[type="password"]::placeholder,
+textarea::placeholder {
+  color: var(--ink-muted);
 }
 input[type="checkbox"] {
   width: 18px;
@@ -108,20 +138,14 @@ input[type="checkbox"] {
 .topbar .brand {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 17px;
+  font-size: 18px;
   letter-spacing: -0.01em;
   display: flex;
   align-items: baseline;
-  gap: 8px;
 }
 .topbar .brand span.tag {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--ink-muted);
-  border: 1px solid var(--border-strong);
-  padding: 2px 6px;
-  border-radius: 4px;
-  letter-spacing: 0;
+  font-weight: 700;
+  color: var(--accent);
 }
 
 .topbar .who {
@@ -158,6 +182,9 @@ main.container {
   border-bottom: 2px solid transparent;
   white-space: nowrap;
 }
+.tab:hover {
+  color: var(--ink);
+}
 .tab.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
@@ -181,6 +208,7 @@ main.container {
 }
 .date-group.today {
   border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-tint);
 }
 .date-group-head {
   display: flex;
@@ -222,11 +250,11 @@ main.container {
   align-items: center;
   gap: 10px;
   padding: 9px 10px;
-  background: var(--surface-sunken);
+  background: var(--surface-2);
   border-radius: var(--radius);
 }
 .order-row .order-id {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 13px;
   font-weight: 500;
 }
@@ -262,14 +290,10 @@ main.container {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg);
-  background-image: repeating-linear-gradient(
-    -45deg,
-    var(--accent-tint) 0px,
-    var(--accent-tint) 12px,
-    transparent 12px,
-    transparent 26px
-  );
+  background:
+    radial-gradient(circle at 15% 10%, rgba(108, 99, 255, 0.16), transparent 45%),
+    radial-gradient(circle at 85% 90%, rgba(35, 166, 213, 0.12), transparent 45%),
+    var(--bg);
 }
 .auth-card {
   background: var(--surface);
@@ -309,7 +333,7 @@ main.container {
   font-size: 11px;
   font-weight: 500;
   background: var(--accent-tint);
-  color: var(--accent);
+  color: var(--accent-hover);
   padding: 2px 8px;
   border-radius: 100px;
 }

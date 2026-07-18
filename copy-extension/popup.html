@@ -3,44 +3,59 @@
   <head>
     <meta charset="UTF-8" />
     <style>
+      @import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap");
       body {
         width: 240px;
-        font-family: -apple-system, sans-serif;
+        font-family: "Inter Tight", -apple-system, sans-serif;
         font-size: 13px;
         padding: 14px;
-        color: #1c1e1f;
+        color: #eef2f8;
+        background: #152238;
       }
       h1 {
         font-size: 14px;
+        font-weight: 600;
         margin: 0 0 10px;
+      }
+      h1 .tag {
+        color: #6c63ff;
+        font-weight: 700;
       }
       input {
         width: 100%;
         box-sizing: border-box;
         padding: 7px 8px;
         margin-bottom: 8px;
-        border: 1px solid #c7c2b6;
+        border: 1px solid #33517d;
         border-radius: 6px;
+        background: #0d1626;
+        color: #eef2f8;
+      }
+      input::placeholder {
+        color: #6d7d99;
       }
       button {
         width: 100%;
         padding: 8px;
         border: none;
         border-radius: 6px;
-        background: #d9560f;
+        background: #6c63ff;
         color: #fff;
         font-weight: 500;
         cursor: pointer;
+      }
+      button:hover {
+        background: #7d75ff;
       }
       .signed-in p {
         margin: 0 0 10px;
       }
       .error {
-        color: #b8342a;
+        color: #ff6b6b;
         margin: 6px 0;
       }
       .hint {
-        color: #6a6d68;
+        color: #a6b3c9;
         margin-top: 10px;
         line-height: 1.4;
       }

@@ -4,7 +4,9 @@ let profile = null;
 let warehouses = [];
 let orders = [];
 let activeWarehouseId = null;
+let activeView = "warehouse"; // "warehouse" | "notes"
 let realtimeChannel = null;
+let notesSaveTimer = null;
 
 export async function renderDashboard(root, session) {
   const { data: profileRow, error: profileError } = await supabase
@@ -54,12 +56,10 @@ export async function renderDashboard(root, session) {
 }
 
 async function paint(root, session) {
-  const activeWarehouse = warehouses.find((w) => w.id === activeWarehouseId);
-
   root.innerHTML = `
     <div class="app-shell">
       <div class="topbar">
-        <div class="brand">Dispatch <span class="tag">tracker</span></div>
+        <div class="brand">Dispatch<span class="tag">EZ</span></div>
         <div class="who">
           ${profile.role === "super_admin" ? `<span class="badge-admin">Super admin</span>` : ""}
           <span>${profile.full_name || session.user.email}</span>
@@ -68,20 +68,76 @@ async function paint(root, session) {
       </div>
       <main class="container">
         <div class="tabs" id="tabs"></div>
-        <div class="manual-add">
-          <input type="text" id="manual-order-id" placeholder="Paste order ID, e.g. WOO-3423" />
-          <select id="manual-warehouse"></select>
-          <button class="primary" id="manual-add-btn">Add order</button>
-        </div>
-        <div id="date-groups"></div>
+        <div id="view-body"></div>
       </main>
     </div>
   `;
 
   root.querySelector("#signout").addEventListener("click", () => supabase.auth.signOut());
   renderTabs(root, session);
+
+  if (activeView === "notes") {
+    await paintNotesView(root, session);
+  } else {
+    await paintWarehouseView(root, session);
+  }
+}
+
+async function paintWarehouseView(root, session) {
+  const body = root.querySelector("#view-body");
+  body.innerHTML = `
+    <div class="manual-add">
+      <input type="text" id="manual-order-id" placeholder="Paste order ID, e.g. WOO-3423" />
+      <select id="manual-warehouse"></select>
+      <button class="primary" id="manual-add-btn">Add order</button>
+    </div>
+    <div id="date-groups"></div>
+  `;
   renderManualAdd(root, session);
   await loadOrdersForActiveWarehouse(root, session);
+}
+
+async function paintNotesView(root, session) {
+  const body = root.querySelector("#view-body");
+  body.innerHTML = `
+    <div class="date-group">
+      <div class="date-group-head">
+        <div class="title"><h3>Notes</h3></div>
+        <span class="count" id="notes-status">Loading…</span>
+      </div>
+      <textarea id="notes-textarea" placeholder="Random notes and stuff…"
+        style="width:100%;min-height:360px;border:1px solid var(--border-strong);
+        border-radius:var(--radius);padding:12px;font-family:var(--font-body);
+        font-size:14px;line-height:1.5;resize:vertical;background:var(--surface-sunken);color:var(--ink)"></textarea>
+    </div>
+  `;
+
+  const textarea = body.querySelector("#notes-textarea");
+  const status = body.querySelector("#notes-status");
+
+  const { data, error } = await supabase
+    .from("notes")
+    .select("content")
+    .eq("user_id", session.user.id)
+    .maybeSingle();
+
+  if (error) {
+    status.textContent = "Couldn't load notes";
+  } else {
+    textarea.value = data?.content || "";
+    status.textContent = "Saved";
+  }
+
+  textarea.addEventListener("input", () => {
+    status.textContent = "Saving…";
+    clearTimeout(notesSaveTimer);
+    notesSaveTimer = setTimeout(async () => {
+      const { error: saveError } = await supabase
+        .from("notes")
+        .upsert({ user_id: session.user.id, content: textarea.value, updated_at: new Date().toISOString() });
+      status.textContent = saveError ? "Couldn't save" : "Saved";
+    }, 600);
+  });
 }
 
 function renderTabs(root, session) {
@@ -89,9 +145,11 @@ function renderTabs(root, session) {
   tabsEl.innerHTML = warehouses
     .map(
       (w) =>
-        `<div class="tab ${w.id === activeWarehouseId ? "active" : ""}" data-id="${w.id}">${escapeHtml(w.name)}</div>`
+        `<div class="tab ${activeView === "warehouse" && w.id === activeWarehouseId ? "active" : ""}" data-id="${w.id}">${escapeHtml(w.name)}</div>`
     )
     .join("");
+
+  tabsEl.innerHTML += `<div class="tab ${activeView === "notes" ? "active" : ""}" id="notes-tab">Notes</div>`;
 
   if (profile.role === "super_admin") {
     tabsEl.innerHTML += `<div class="tab add-warehouse" id="add-warehouse-tab"><i>+</i> Add warehouse</div>`;
@@ -99,9 +157,15 @@ function renderTabs(root, session) {
 
   tabsEl.querySelectorAll(".tab[data-id]").forEach((el) => {
     el.addEventListener("click", async () => {
+      activeView = "warehouse";
       activeWarehouseId = el.dataset.id;
       await paint(root, session);
     });
+  });
+
+  tabsEl.querySelector("#notes-tab").addEventListener("click", async () => {
+    activeView = "notes";
+    await paint(root, session);
   });
 
   const addTab = tabsEl.querySelector("#add-warehouse-tab");
@@ -118,8 +182,9 @@ function renderManualAdd(root, session) {
   select.innerHTML = options.map((w) => `<option value="${w.id}">${escapeHtml(w.name)}</option>`).join("");
   select.value = options.some((w) => w.id === activeWarehouseId) ? activeWarehouseId : options[0]?.id || "";
 
-  root.querySelector("#manual-add-btn").addEventListener("click", async () => {
-    const input = root.querySelector("#manual-order-id");
+  const input = root.querySelector("#manual-order-id");
+
+  const submitOrder = async () => {
     const orderId = input.value.trim();
     const warehouseId = select.value;
     if (!orderId || !warehouseId) return;
@@ -134,7 +199,16 @@ function renderManualAdd(root, session) {
       return;
     }
     input.value = "";
+    input.focus();
     if (warehouseId === activeWarehouseId) await loadOrdersForActiveWarehouse(root, session);
+  };
+
+  root.querySelector("#manual-add-btn").addEventListener("click", submitOrder);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submitOrder();
+    }
   });
 }
 
@@ -277,7 +351,7 @@ function subscribeRealtime(root, session) {
   realtimeChannel = supabase
     .channel("orders-changes")
     .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => {
-      loadOrdersForActiveWarehouse(root, session);
+      if (activeView === "warehouse") loadOrdersForActiveWarehouse(root, session);
     })
     .subscribe();
 }

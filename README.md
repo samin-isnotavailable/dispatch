@@ -1,99 +1,140 @@
-# Dispatch tracker
+# DispatchEZ
 
-Order-dispatch tracker for routing confirmed orders to warehouses (Badda,
-Multiplan, CTG, and whatever else gets added later). Capture an order ID
-from a right-click browser extension, or type it in manually; it lands in
-a shared, real-time dashboard grouped by date, with bulk-complete and
-export-to-text per date.
+Order-dispatch tracker for routing confirmed orders to warehouses. Capture
+an order ID with a right-click browser extension or type it in manually —
+it lands in a shared, real-time dashboard grouped by date, with per-date
+bulk-complete and export-to-text.
 
-Same shape as [messenger-capture](https://github.com/samin-isnotavailable/messenger-capture):
-Vite + vanilla JS dashboard, Supabase for auth/DB/realtime, Vercel hosting,
-and a Manifest v3 browser extension for capture.
+**Live:** [dispatchez.vercel.app](https://dispatchez.vercel.app/)
+
+Built with the same stack as its sibling tool,
+[messenger-capture](https://github.com/samin-isnotavailable/messenger-capture):
+Vite + vanilla JS, Supabase (auth/DB/realtime), Vercel hosting, and a
+Manifest v3 browser extension for capture.
+
+---
+
+## Features
+
+- **Warehouse tabs** — dynamic, driven by a `warehouses` table, not
+  hardcoded. Add a new warehouse from the dashboard and it shows up
+  everywhere (including the extension's context menu) without a redeploy.
+- **Two entry points** — a browser extension (select text → right-click →
+  send to a warehouse) and a manual add box in the dashboard, with
+  Enter-to-submit for fast repeated entry.
+- **Date-grouped orders** — each day gets its own card with a live count,
+  a "mark all complete" bulk action, and a one-click export to a plain
+  `.txt` list of order IDs (also copied to clipboard).
+- **Real-time sync** — every connected browser sees new/updated/deleted
+  orders instantly via Supabase Realtime, no polling or manual refresh.
+- **Role-based access** — `super_admin` sees and manages every warehouse;
+  `staff` land directly on their assigned warehouse, can browse others
+  read-only, and can only add/edit/delete within their own. Enforced by
+  Postgres Row Level Security, not just UI conditionals — the rules hold
+  even if the frontend has a bug.
+- **Personal notes** — a private, autosaving scratchpad per user.
+
+## Tech stack
+
+| Layer      | Choice                                    |
+|------------|--------------------------------------------|
+| Frontend   | Vite + vanilla JS                          |
+| Backend    | Supabase (Postgres, Auth, Realtime, RLS)   |
+| Hosting    | Vercel                                     |
+| Extension  | Chrome/Brave, Manifest v3                  |
 
 ## Roles
 
-- **super_admin** (you) — sees every warehouse, is the only one who can add
-  new warehouses, can add/edit orders in any warehouse.
-- **staff** — lands on their assigned warehouse on login, can browse other
-  warehouses read-only, can only add/check off orders in their own
+- **super_admin** — sees every warehouse, is the only role that can add
+  new warehouses, can add/edit/delete orders in any warehouse.
+- **staff** — lands on their assigned warehouse on login, can browse
+  other warehouses read-only, can only add/check off orders in their own
   warehouse.
 
-## 1. Set up Supabase
+---
+
+## Setup
+
+### 1. Supabase
 
 1. Create a free project at [supabase.com](https://supabase.com).
-2. Open the SQL editor and run `supabase/migrations/0001_init.sql`. This
-   creates the `warehouses`, `profiles`, and `orders` tables, sets up row
-   level security, and seeds Badda / Multiplan / CTG.
-3. Go to **Authentication → Users** and manually invite/create an account
-   for yourself and each staff member (email + password is enough).
-4. For each user, go to **Table editor → profiles** and set:
-   - `role` to `super_admin` (just you) or `staff` (everyone else)
-   - `warehouse_id` to the staff member's assigned warehouse (leave blank
+2. Open the SQL editor and run, in order:
+   - `supabase/migrations/0001_init.sql` — creates `warehouses`,
+     `profiles`, `orders`, sets up RLS, and seeds a few starter
+     warehouses.
+   - `supabase/migrations/0002_notes.sql` — adds the personal notes
+     table.
+3. **Authentication → Users** — create an account for yourself and each
+   staff member (email + password is enough).
+4. **Table editor → profiles** — for each user, set:
+   - `role` → `super_admin` (you) or `staff` (everyone else)
+   - `warehouse_id` → the staff member's assigned warehouse (leave blank
      for super_admin)
-5. Copy your **Project URL** and **anon public key** from
-   **Settings → API** — you'll need both below.
+5. **Settings → API** — copy the **Project URL** and **anon public key**
+   (you'll need both next).
 
-There's no admin UI for assigning roles yet (see Notes) — do it from the
-Supabase table editor for now.
+> There's no admin UI for assigning roles yet — do it from the Supabase
+> table editor for now. See [Roadmap](#roadmap).
 
-## 2. Run the dashboard locally
+### 2. Dashboard (local)
 
-```
+```bash
 npm install
 cp .env.example .env
-# fill in VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env
+# fill in VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
 npm run dev
 ```
 
-## 3. Deploy to Vercel
+### 3. Deploy
 
-Push this repo to GitHub, import it in Vercel, and set the same two
-environment variables (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) in
-the Vercel project settings. Vercel auto-detects the Vite build.
+Push to GitHub, import the repo in Vercel, and set the same two
+environment variables in the Vercel project settings. Vercel auto-detects
+the Vite build.
 
-## 4. Install the browser extension
+### 4. Browser extension
 
-1. Open `messenger-extension/config.js` and fill in the same
-   `SUPABASE_URL` and `SUPABASE_ANON_KEY` you used in `.env`.
-2. In Chrome/Brave, go to `chrome://extensions`, enable **Developer mode**,
-   click **Load unpacked**, and select the `messenger-extension/` folder.
-3. Click the extension icon, sign in with your Supabase account.
-4. Select an order ID on any page, right-click → **Send to warehouse** →
-   pick the warehouse. A ✓ badge confirms it landed; a ✓ shows briefly
-   over the toolbar icon.
+1. Open `copy-extension/config.js` and fill in the same
+   `SUPABASE_URL` / `SUPABASE_ANON_KEY` values as your `.env`.
+2. `chrome://extensions` → enable **Developer mode** → **Load unpacked**
+   → select the `copy-extension/` folder.
+3. Click the extension icon and sign in.
+4. Select an order ID on any page → right-click → **Send to warehouse**.
 
-The extension's right-click menu is built from the live `warehouses`
-table (refreshes every 30 minutes, or immediately after sign-in), so
-adding a warehouse in the dashboard shows up in the menu without
-reinstalling the extension.
+The context menu is built from the live `warehouses` table (refreshes
+every 30 minutes, or immediately after sign-in), so new warehouses appear
+without reinstalling the extension.
+
+---
 
 ## Project structure
 
 ```
-dispatch-tracker/
-├── src/                    # Dashboard (Vite + vanilla JS)
+dispatchez/
+├── src/                     # Dashboard (Vite + vanilla JS)
 │   ├── main.js
 │   ├── auth.js
 │   ├── dashboard.js
 │   ├── supabaseClient.js
 │   └── style.css
-├── messenger-extension/    # Browser extension (Manifest v3)
+├── copy-extension/     # Browser extension (Manifest v3)
 │   ├── manifest.json
-│   ├── background.js       # builds the context menu, saves captures
-│   ├── authClient.js        # Supabase Auth REST calls + token refresh
+│   ├── background.js        # builds the context menu, saves captures
+│   ├── authClient.js         # Supabase Auth REST calls + token refresh
 │   ├── popup.html / popup.js
 │   └── config.js
-├── supabase/migrations/0001_init.sql
+├── supabase/migrations/
+│   ├── 0001_init.sql
+│   └── 0002_notes.sql
 └── index.html
 ```
 
-## Notes / next steps
+## Roadmap
 
-- **Admin UI for staff/warehouse management** isn't built yet — role and
-  warehouse assignment happens in the Supabase table editor. Worth adding
-  a simple admin screen once the core flow is proven out day-to-day.
-- **Export** downloads a `.txt` file (`Warehouse_Date.txt`, one order ID
-  per line) and also copies the same text to your clipboard.
-- RLS is the source of truth for permissions — even if the UI has a bug,
-  a staff member's Supabase session physically cannot write outside their
-  assigned warehouse.
+- Admin UI for assigning staff roles/warehouses (currently Supabase
+  table editor only)
+- Bulk import of order IDs
+- Per-warehouse export history / archive view
+
+## License
+
+[MIT](LICENSE) — use it, fork it, adapt it, just keep the copyright notice.

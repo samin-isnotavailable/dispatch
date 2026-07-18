@@ -1,5 +1,6 @@
 # DispatchEZ
 
+
 Order-dispatch tracker for routing confirmed orders to warehouses. Capture
 an order ID with a right-click browser extension or type it in manually —
 it lands in a shared, real-time dashboard grouped by date, with per-date

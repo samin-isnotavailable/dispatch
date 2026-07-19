@@ -61,7 +61,7 @@ async function paint(root, session) {
       <div class="topbar">
         <div class="brand">Dispatch<span class="tag">EZ</span></div>
         <div class="who">
-          ${profile.role === "super_admin" ? `<span class="badge-admin">Super admin</span>` : ""}
+          ${profile.role === "super_admin" ? `<span class="badge-admin">Super admin</span><a href="/admin" style="color:var(--ink-secondary);font-size:13px;text-decoration:none">Admin panel</a>` : ""}
           <span>${profile.full_name || session.user.email}</span>
           <button class="ghost" id="signout">Sign out</button>
         </div>
@@ -216,7 +216,7 @@ function renderManualAdd(root, session) {
 async function loadOrdersForActiveWarehouse(root, session) {
   const { data, error } = await supabase
     .from("orders")
-    .select("id, order_id, done, created_at, created_by, dispatch_date, exception_type, exception_note, rescheduled_to_id, warehouse_id")
+    .select("id, order_id, warehouse_id, done, created_at, created_by, dispatch_date, exception_type, exception_note, rescheduled_to_id")
     .eq("warehouse_id", activeWarehouseId)
     .order("created_at", { ascending: false });
 

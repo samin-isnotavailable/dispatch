@@ -435,6 +435,57 @@ main.container {
   border-radius: 100px;
 }
 
+/* ---------------- Admin panel ---------------- */
+
+.admin-page {
+  max-width: 640px;
+}
+
+.admin-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.admin-form .span-2 {
+  grid-column: 1 / -1;
+}
+.admin-form .password-field {
+  display: flex;
+  gap: 8px;
+}
+.admin-form .password-field input {
+  flex: 1;
+}
+.admin-form #create-status {
+  font-size: 13px;
+  margin: 0;
+}
+
+.user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  flex-wrap: wrap;
+}
+.user-row .user-name {
+  font-weight: 500;
+  flex: 1 1 140px;
+  min-width: 140px;
+}
+.user-row select {
+  flex: 1 1 130px;
+}
+.user-row .save-user {
+  flex: 0 0 auto;
+}
+.user-row .save-status {
+  flex-basis: 100%;
+  font-size: 12px;
+}
+
 /* ---------------- Mobile (tested down to 360px, Galaxy S8+) ---------------- */
 
 @media (max-width: 480px) {
@@ -478,5 +529,18 @@ main.container {
   }
   .order-row .time {
     margin-left: 0;
+  }
+
+  .admin-form {
+    grid-template-columns: 1fr;
+    max-width: 100%;
+  }
+
+  .user-row .user-name {
+    flex-basis: 100%;
+  }
+  .user-row select,
+  .user-row .save-user {
+    flex: 1 1 0;
   }
 }

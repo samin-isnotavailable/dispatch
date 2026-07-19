@@ -40,14 +40,14 @@ async function paint(root, session, warehouses) {
           <button class="ghost" id="signout">Sign out</button>
         </div>
       </div>
-      <main class="container">
+      <main class="container admin-page">
         <div class="date-group">
           <div class="date-group-head"><div class="title"><h3>Add a user</h3></div></div>
-          <form id="create-user-form" style="display:flex;flex-direction:column;gap:10px;max-width:420px">
+          <form id="create-user-form" class="admin-form">
             <input type="text" id="new-name" placeholder="Full name" />
             <input type="text" id="new-email" placeholder="Email" required />
-            <div style="display:flex;gap:8px">
-              <input type="text" id="new-password" placeholder="Temporary password" value="${generatePassword()}" required style="flex:1" />
+            <div class="password-field span-2">
+              <input type="text" id="new-password" placeholder="Temporary password" value="${generatePassword()}" required />
               <button type="button" class="ghost" id="regen-password" title="Generate a new password">↻</button>
             </div>
             <select id="new-role">
@@ -57,8 +57,8 @@ async function paint(root, session, warehouses) {
             <select id="new-warehouse">
               ${warehouses.map((w) => `<option value="${w.id}">${escapeHtml(w.name)}</option>`).join("")}
             </select>
-            <button type="submit" class="primary">Create user</button>
-            <p id="create-status" style="font-size:13px"></p>
+            <button type="submit" class="primary span-2">Create user</button>
+            <p id="create-status" class="span-2"></p>
           </form>
         </div>
 
@@ -68,8 +68,8 @@ async function paint(root, session, warehouses) {
             ${profiles
               .map(
                 (p) => `
-              <div class="order-row" data-user-id="${p.id}" style="flex-wrap:wrap">
-                <span class="order-id" style="font-family:var(--font-body);min-width:140px">${escapeHtml(p.full_name || "(no name)")}</span>
+              <div class="user-row" data-user-id="${p.id}">
+                <span class="user-name">${escapeHtml(p.full_name || "(no name)")}</span>
                 <select class="edit-role" data-id="${p.id}">
                   <option value="staff" ${p.role === "staff" ? "selected" : ""}>Staff</option>
                   <option value="super_admin" ${p.role === "super_admin" ? "selected" : ""}>Super admin</option>
@@ -80,7 +80,7 @@ async function paint(root, session, warehouses) {
                     .join("")}
                 </select>
                 <button class="save-user" data-id="${p.id}">Save</button>
-                <span class="time save-status" data-id="${p.id}"></span>
+                <span class="save-status" data-id="${p.id}"></span>
               </div>`
               )
               .join("")}

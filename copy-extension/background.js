@@ -3,6 +3,14 @@ import { authedFetch, getSession } from "./authClient.js";
 const PARENT_ID = "dispatch-capture-parent";
 const REFRESH_ALARM = "refresh-warehouse-menu";
 
+function todayDateKey() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 async function rebuildMenu() {
   await chrome.contextMenus.removeAll();
 
@@ -66,6 +74,7 @@ chrome.contextMenus.onClicked.addListener(async (info) => {
       body: JSON.stringify({
         order_id: orderId,
         warehouse_id: warehouseId,
+        dispatch_date: todayDateKey(),
         created_by: session.user_id,
       }),
     });

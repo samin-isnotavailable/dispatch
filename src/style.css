@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap");
 
 :root {
   /* Navy surface scale — from brand color inspo */
@@ -28,7 +28,6 @@
 
   --font-display: "Inter Tight", sans-serif;
   --font-body: "Inter Tight", -apple-system, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --radius: 8px;
   color-scheme: dark;
 }
@@ -289,6 +288,87 @@ main.container {
   color: var(--danger);
   background: rgba(255, 107, 107, 0.12);
 }
+
+/* ---------------- Exception flag (incomplete order) ---------------- */
+
+.exception-badge {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--danger);
+  background: rgba(255, 107, 107, 0.14);
+  padding: 2px 8px;
+  border-radius: 100px;
+  white-space: nowrap;
+}
+.moved-from {
+  font-size: 11px;
+  color: var(--ink-muted);
+  font-style: italic;
+  white-space: nowrap;
+}
+.order-row .flag-incomplete,
+.order-row .clear-exception {
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--ink-muted);
+  border-radius: 6px;
+}
+.order-row .flag-incomplete:hover {
+  color: var(--danger);
+  background: rgba(255, 107, 107, 0.12);
+}
+.order-row .clear-exception:hover {
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.exception-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 16px;
+}
+.exception-dialog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  width: 320px;
+  max-width: 100%;
+}
+.exception-dialog h3 {
+  font-family: var(--font-display);
+  font-size: 15px;
+  margin: 0 0 16px;
+}
+.exception-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 8px 0;
+  cursor: pointer;
+}
+.exception-option input {
+  accent-color: var(--accent);
+}
+.exception-dialog textarea {
+  width: 100%;
+  min-height: 70px;
+  margin-top: 8px;
+  resize: vertical;
+}
+.exception-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
 /* ---------------- Manual add bar ---------------- */
 
 .manual-add {
@@ -354,6 +434,7 @@ main.container {
   padding: 2px 8px;
   border-radius: 100px;
 }
+
 /* ---------------- Mobile (tested down to 360px, Galaxy S8+) ---------------- */
 
 @media (max-width: 480px) {
@@ -390,5 +471,12 @@ main.container {
   }
   .date-group-head .actions button {
     flex: 1;
+  }
+
+  .order-row {
+    flex-wrap: wrap;
+  }
+  .order-row .time {
+    margin-left: 0;
   }
 }

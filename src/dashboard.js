@@ -108,7 +108,7 @@ async function paintNotesView(root, session) {
       <textarea id="notes-textarea" placeholder="Random notes and stuff…"
         style="width:100%;min-height:360px;border:1px solid var(--border-strong);
         border-radius:var(--radius);padding:12px;font-family:var(--font-body);
-        font-size:14px;line-height:1.5;resize:vertical;background:var(--surface-sunken);color:var(--ink)"></textarea>
+        font-size:14px;line-height:1.5;resize:vertical;background:var(--surface-2);color:var(--ink)"></textarea>
     </div>
   `;
 
@@ -192,6 +192,7 @@ function renderManualAdd(root, session) {
     const { error } = await supabase.from("orders").insert({
       order_id: orderId,
       warehouse_id: warehouseId,
+      dispatch_date: todayDateKey(),
       created_by: session.user.id,
     });
     if (error) {
@@ -215,7 +216,7 @@ function renderManualAdd(root, session) {
 async function loadOrdersForActiveWarehouse(root, session) {
   const { data, error } = await supabase
     .from("orders")
-    .select("id, order_id, done, created_at, created_by")
+    .select("id, order_id, done, created_at, created_by, dispatch_date, exception_type, exception_note, rescheduled_to_id, warehouse_id")
     .eq("warehouse_id", activeWarehouseId)
     .order("created_at", { ascending: false });
 
@@ -236,23 +237,26 @@ function renderDateGroups(root, session) {
 
   const groups = new Map();
   for (const o of orders) {
-    const dateKey = new Date(o.created_at).toDateString();
+    const dateKey = o.dispatch_date;
     if (!groups.has(dateKey)) groups.set(dateKey, []);
     groups.get(dateKey).push(o);
   }
 
-  const todayKey = new Date().toDateString();
+  const sortedKeys = [...groups.keys()].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+  const todayKey = todayDateKey();
   const canEdit = profile.role === "super_admin" || activeWarehouseId === profile.warehouse_id;
 
-  container.innerHTML = [...groups.entries()]
-    .map(([dateKey, rows]) => {
+  container.innerHTML = sortedKeys
+    .map((dateKey) => {
+      const rows = groups.get(dateKey);
       const doneCount = rows.filter((r) => r.done).length;
+      const flaggedCount = rows.filter((r) => r.exception_type).length;
       return `
         <div class="date-group ${dateKey === todayKey ? "today" : ""}" data-date="${dateKey}">
           <div class="date-group-head">
             <div class="title">
               <h3>${formatDateLabel(dateKey)}</h3>
-              <span class="count">${rows.length} order${rows.length === 1 ? "" : "s"} · ${doneCount} done</span>
+              <span class="count">${rows.length} order${rows.length === 1 ? "" : "s"} · ${doneCount} done${flaggedCount ? ` · ${flaggedCount} flagged` : ""}</span>
             </div>
             <div class="actions">
               ${canEdit ? `<button class="mark-all" data-date="${dateKey}">Mark all complete</button>` : ""}
@@ -261,31 +265,27 @@ function renderDateGroups(root, session) {
           </div>
           <div class="order-list">
             ${rows
-              .map(
-                (o) => `
-              <div class="order-row ${o.done ? "done" : ""}">
-                <input type="checkbox" data-id="${o.id}" ${o.done ? "checked" : ""} ${canEdit ? "" : "disabled"} />
+              .map((o) => {
+                const flagLabel = getExceptionLabel(o);
+                const movedFromLabel = getMovedFromLabel(o);
+                return `
+              <div class="order-row ${o.done ? "done" : ""} ${o.exception_type ? "exception" : ""}">
+                <input type="checkbox" data-id="${o.id}" ${o.done ? "checked" : ""} ${canEdit && !o.exception_type ? "" : "disabled"} />
                 <span class="order-id">${escapeHtml(o.order_id)}</span>
+                ${flagLabel ? `<span class="exception-badge">${escapeHtml(flagLabel)}</span>` : ""}
+                ${movedFromLabel ? `<span class="moved-from">${escapeHtml(movedFromLabel)}</span>` : ""}
                 <span class="time">${formatTime(o.created_at)}</span>
+                ${canEdit && !o.exception_type ? `<button class="ghost flag-incomplete" data-id="${o.id}" title="Mark incomplete">⚑</button>` : ""}
+                ${canEdit && o.exception_type ? `<button class="ghost clear-exception" data-id="${o.id}" title="Clear flag">↺</button>` : ""}
                 ${profile.role === "super_admin" ? `<button class="ghost delete-order" data-id="${o.id}" title="Delete order">✕</button>` : ""}
-              </div>`
-              )
+              </div>`;
+              })
               .join("")}
           </div>
         </div>`;
     })
     .join("");
-  container.querySelectorAll(".delete-order").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (!confirm("Delete this order? This can't be undone.")) return;
-      const { error } = await supabase.from("orders").delete().eq("id", btn.dataset.id);
-      if (error) {
-        alert(`Couldn't delete order: ${error.message}`);
-        return;
-      }
-      await loadOrdersForActiveWarehouse(root, session);
-    });
-  });
+
   container.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
     cb.addEventListener("change", async () => {
       const { error } = await supabase
@@ -304,13 +304,40 @@ function renderDateGroups(root, session) {
   container.querySelectorAll(".mark-all").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const dateKey = btn.dataset.date;
-      const ids = groups.get(dateKey).map((o) => o.id);
+      const ids = groups.get(dateKey).filter((o) => !o.exception_type).map((o) => o.id);
+      if (!ids.length) return;
       const { error } = await supabase.from("orders").update({ done: true }).in("id", ids);
       if (error) {
         alert(`Couldn't mark all complete: ${error.message}`);
         return;
       }
       await loadOrdersForActiveWarehouse(root, session);
+    });
+  });
+
+  container.querySelectorAll(".delete-order").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Delete this order? This can't be undone.")) return;
+      const { error } = await supabase.from("orders").delete().eq("id", btn.dataset.id);
+      if (error) {
+        alert(`Couldn't delete order: ${error.message}`);
+        return;
+      }
+      await loadOrdersForActiveWarehouse(root, session);
+    });
+  });
+
+  container.querySelectorAll(".flag-incomplete").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const order = orders.find((o) => o.id === btn.dataset.id);
+      if (order) openExceptionDialog(order, root, session);
+    });
+  });
+
+  container.querySelectorAll(".clear-exception").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const order = orders.find((o) => o.id === btn.dataset.id);
+      if (order) clearException(order, root, session);
     });
   });
 
@@ -323,10 +350,128 @@ function renderDateGroups(root, session) {
   });
 }
 
+function getExceptionLabel(o) {
+  if (o.exception_type === "rescheduled") {
+    const target = orders.find((x) => x.id === o.rescheduled_to_id);
+    return target ? `Moved to ${formatDateLabel(target.dispatch_date)}` : "Rescheduled";
+  }
+  if (o.exception_type === "cancelled") return "Cancelled";
+  if (o.exception_type === "other") return o.exception_note || "Other";
+  return null;
+}
+
+function getMovedFromLabel(o) {
+  const source = orders.find((x) => x.rescheduled_to_id === o.id);
+  return source ? `moved from ${formatDateLabel(source.dispatch_date)}` : null;
+}
+
+function openExceptionDialog(order, root, session) {
+  const overlay = document.createElement("div");
+  overlay.className = "exception-overlay";
+  overlay.innerHTML = `
+    <div class="exception-dialog">
+      <h3>Mark ${escapeHtml(order.order_id)} as incomplete</h3>
+      <label class="exception-option">
+        <input type="radio" name="exception-reason" value="rescheduled" checked />
+        Missed — dispatch next day
+      </label>
+      <label class="exception-option">
+        <input type="radio" name="exception-reason" value="cancelled" />
+        Cancelled
+      </label>
+      <label class="exception-option">
+        <input type="radio" name="exception-reason" value="other" />
+        Other
+      </label>
+      <textarea id="exception-note" placeholder="What happened?" style="display:none"></textarea>
+      <div class="exception-actions">
+        <button class="ghost" id="exception-cancel">Cancel</button>
+        <button class="primary" id="exception-confirm">Confirm</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const noteBox = overlay.querySelector("#exception-note");
+  overlay.querySelectorAll('input[name="exception-reason"]').forEach((radio) => {
+    radio.addEventListener("change", () => {
+      const selected = overlay.querySelector('input[name="exception-reason"]:checked').value;
+      noteBox.style.display = selected === "other" ? "block" : "none";
+    });
+  });
+
+  overlay.querySelector("#exception-cancel").addEventListener("click", () => overlay.remove());
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+
+  overlay.querySelector("#exception-confirm").addEventListener("click", async () => {
+    const selected = overlay.querySelector('input[name="exception-reason"]:checked').value;
+    const note = noteBox.value.trim();
+    if (selected === "other" && !note) {
+      alert('Add a quick note for "Other".');
+      return;
+    }
+    overlay.remove();
+    await applyException(order, selected, note, root, session);
+  });
+}
+
+async function applyException(order, type, note, root, session) {
+  if (type === "rescheduled") {
+    const nextDate = addDays(order.dispatch_date, 1);
+    const { data: newOrder, error: insertError } = await supabase
+      .from("orders")
+      .insert({
+        order_id: order.order_id,
+        warehouse_id: order.warehouse_id,
+        dispatch_date: nextDate,
+        created_by: session.user.id,
+      })
+      .select()
+      .single();
+    if (insertError) {
+      alert(`Couldn't reschedule: ${insertError.message}`);
+      return;
+    }
+    const { error: updateError } = await supabase
+      .from("orders")
+      .update({ exception_type: "rescheduled", rescheduled_to_id: newOrder.id })
+      .eq("id", order.id);
+    if (updateError) {
+      alert(`Couldn't flag original order: ${updateError.message}`);
+      return;
+    }
+  } else {
+    const { error } = await supabase
+      .from("orders")
+      .update({ exception_type: type, exception_note: type === "other" ? note : null })
+      .eq("id", order.id);
+    if (error) {
+      alert(`Couldn't update order: ${error.message}`);
+      return;
+    }
+  }
+  await loadOrdersForActiveWarehouse(root, session);
+}
+
+async function clearException(order, root, session) {
+  if (!confirm("Clear this flag and restore the order to normal?")) return;
+  const { error } = await supabase
+    .from("orders")
+    .update({ exception_type: null, exception_note: null, rescheduled_to_id: null })
+    .eq("id", order.id);
+  if (error) {
+    alert(`Couldn't clear flag: ${error.message}`);
+    return;
+  }
+  await loadOrdersForActiveWarehouse(root, session);
+}
+
 function exportOrderIds(rows, dateKey) {
   const text = rows.map((r) => r.order_id).join("\n");
   const warehouseName = warehouses.find((w) => w.id === activeWarehouseId)?.name || "warehouse";
-  const filename = `${warehouseName}_${dateKey.replace(/\s+/g, "-")}.txt`;
+  const filename = `${warehouseName}_${dateKey}.txt`;
 
   const blob = new Blob([text], { type: "text/plain" });
   const url = URL.createObjectURL(blob);
@@ -367,8 +512,25 @@ function subscribeRealtime(root, session) {
     .subscribe();
 }
 
+function todayDateKey() {
+  return dateKeyFromDate(new Date());
+}
+
+function addDays(dateKey, days) {
+  const d = new Date(dateKey + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return dateKeyFromDate(d);
+}
+
+function dateKeyFromDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function formatDateLabel(dateKey) {
-  const d = new Date(dateKey);
+  const d = new Date(dateKey + "T00:00:00");
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 }
 

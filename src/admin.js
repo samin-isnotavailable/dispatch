@@ -80,11 +80,31 @@ async function paint(root, session, warehouses) {
                     .join("")}
                 </select>
                 <button class="save-user" data-id="${p.id}">Save</button>
+                ${p.id !== session.user.id ? `<button class="ghost delete-user" data-id="${p.id}" title="Delete user">✕</button>` : ""}
                 <span class="save-status" data-id="${p.id}"></span>
               </div>`
               )
               .join("")}
           </div>
+        </div>
+
+        <div class="date-group">
+          <div class="date-group-head"><div class="title"><h3>Warehouses</h3></div></div>
+          <div class="order-list" id="warehouse-list" style="margin-bottom:14px">
+            ${warehouses
+              .map(
+                (w) => `
+              <div class="user-row">
+                <span class="user-name">${escapeHtml(w.name)}</span>
+              </div>`
+              )
+              .join("")}
+          </div>
+          <form id="add-warehouse-form" style="display:flex;gap:8px;max-width:420px">
+            <input type="text" id="new-warehouse-name" placeholder="New warehouse name" required style="flex:1" />
+            <button type="submit" class="primary">Add</button>
+          </form>
+          <p id="warehouse-status" style="font-size:13px;margin-top:8px"></p>
         </div>
       </main>
     </div>
@@ -131,7 +151,8 @@ async function paint(root, session, warehouses) {
 
       status.textContent = `Created ${result.email}. Share this password with them: ${payload.password}`;
       status.style.color = "var(--success)";
-      await paint(root, session, warehouses);
+      const { data: refreshedWarehouses } = await supabase.from("warehouses").select("id, name").order("name");
+      await paint(root, session, refreshedWarehouses || warehouses);
     } catch (err) {
       status.textContent = err.message;
       status.style.color = "var(--danger)";
@@ -160,6 +181,54 @@ async function paint(root, session, warehouses) {
       const warehouseSelect = root.querySelector(`.edit-warehouse[data-id="${select.dataset.id}"]`);
       warehouseSelect.disabled = select.value === "super_admin";
     });
+  });
+
+  root.querySelectorAll(".delete-user").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      const row = root.querySelector(`.user-row[data-user-id="${id}"]`);
+      const name = row?.querySelector(".user-name")?.textContent || "this user";
+      if (!confirm(`Delete ${name}? This permanently removes their login and can't be undone.`)) return;
+
+      const statusEl = root.querySelector(`.save-status[data-id="${id}"]`);
+      statusEl.textContent = "Deleting…";
+      statusEl.style.color = "var(--ink-muted)";
+
+      try {
+        const res = await fetch("/api/admin-delete-user", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ id }),
+        });
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error || "Something went wrong");
+        await paint(root, session, warehouses);
+      } catch (err) {
+        statusEl.textContent = `Failed: ${err.message}`;
+        statusEl.style.color = "var(--danger)";
+      }
+    });
+  });
+
+  root.querySelector("#add-warehouse-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = root.querySelector("#new-warehouse-name");
+    const status = root.querySelector("#warehouse-status");
+    const name = input.value.trim();
+    if (!name) return;
+
+    const { error } = await supabase.from("warehouses").insert({ name });
+    if (error) {
+      status.textContent = `Couldn't add warehouse: ${error.message}`;
+      status.style.color = "var(--danger)";
+      return;
+    }
+    input.value = "";
+    const { data: refreshedWarehouses } = await supabase.from("warehouses").select("id, name").order("name");
+    await paint(root, session, refreshedWarehouses || warehouses);
   });
 }
 

@@ -36,13 +36,13 @@ export async function renderDashboard(root, session) {
   if (!warehouses.length) {
     root.innerHTML = `<div class="auth-screen"><div class="auth-card">
       <h1>No warehouses yet</h1>
-      <p class="sub">${profile.role === "super_admin" ? "Add your first warehouse to get started." : "Ask your admin to set up a warehouse."}</p>
-      ${profile.role === "super_admin" ? `<button id="add-first-wh" class="primary">Add warehouse</button>` : ""}
+      <p class="sub">${profile.role === "super_admin" ? "Add your first warehouse from the admin panel." : "Ask your admin to set up a warehouse."}</p>
+      ${profile.role === "super_admin" ? `<button id="go-admin" class="primary">Go to admin panel</button>` : ""}
       <button id="signout">Sign out</button>
     </div></div>`;
     root.querySelector("#signout").addEventListener("click", () => supabase.auth.signOut());
-    const addBtn = root.querySelector("#add-first-wh");
-    if (addBtn) addBtn.addEventListener("click", () => addWarehouse(root, session));
+    const goAdminBtn = root.querySelector("#go-admin");
+    if (goAdminBtn) goAdminBtn.addEventListener("click", () => (window.location.href = "/admin"));
     return;
   }
 
@@ -151,10 +151,6 @@ function renderTabs(root, session) {
 
   tabsEl.innerHTML += `<div class="tab ${activeView === "notes" ? "active" : ""}" id="notes-tab">Notes</div>`;
 
-  if (profile.role === "super_admin") {
-    tabsEl.innerHTML += `<div class="tab add-warehouse" id="add-warehouse-tab"><i>+</i> Add warehouse</div>`;
-  }
-
   tabsEl.querySelectorAll(".tab[data-id]").forEach((el) => {
     el.addEventListener("click", async () => {
       activeView = "warehouse";
@@ -167,9 +163,6 @@ function renderTabs(root, session) {
     activeView = "notes";
     await paint(root, session);
   });
-
-  const addTab = tabsEl.querySelector("#add-warehouse-tab");
-  if (addTab) addTab.addEventListener("click", () => addWarehouse(root, session));
 }
 
 function renderManualAdd(root, session) {
@@ -484,22 +477,6 @@ function exportOrderIds(rows, dateKey) {
   if (navigator.clipboard) {
     navigator.clipboard.writeText(text).catch(() => {});
   }
-}
-
-async function addWarehouse(root, session) {
-  const name = prompt("New warehouse name:");
-  if (!name || !name.trim()) return;
-  const { error } = await supabase.from("warehouses").insert({ name: name.trim() });
-  if (error) {
-    alert(`Couldn't add warehouse: ${error.message}`);
-    return;
-  }
-  const { data: warehouseRows } = await supabase
-    .from("warehouses")
-    .select("id, name")
-    .order("name", { ascending: true });
-  warehouses = warehouseRows || [];
-  await paint(root, session);
 }
 
 function subscribeRealtime(root, session) {

@@ -29,14 +29,38 @@ export async function renderPrebook(body, session, profile) {
 }
 
 async function loadData() {
-  const [productsRes, batchesRes, ordersRes] = await Promise.all([
-    supabase.from("products").select("id, name, sku").order("name"),
+  const [batchesRes, ordersRes] = await Promise.all([
     supabase.from("prebook_batches").select("id, product_id, expected_date, stock_quantity, status, created_at"),
     supabase.from("prebook_orders").select("id, batch_id, order_id, created_at"),
   ]);
-  products = productsRes.data || [];
+  products = await fetchAllProducts();
   batches = batchesRes.data || [];
   orders = ordersRes.data || [];
+}
+
+// Supabase caps a single .select() at 1,000 rows by default. Order/batch
+// volume here is tiny, but a real WooCommerce catalog can easily exceed
+// that — so fetch products in pages until we've got everything, instead
+// of silently truncating past the first 1,000.
+async function fetchAllProducts() {
+  const pageSize = 1000;
+  let all = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("products")
+      .select("id, name, sku")
+      .order("name")
+      .range(from, from + pageSize - 1);
+    if (error) {
+      console.error("Couldn't load products:", error.message);
+      break;
+    }
+    all = all.concat(data || []);
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
 }
 
 function render(body, session, profile) {

@@ -486,6 +486,52 @@ main.container {
   font-size: 12px;
 }
 
+/* ---------------- Pre-book ---------------- */
+
+.prebook-create {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 480px;
+}
+
+.product-combobox {
+  position: relative;
+}
+.product-suggestions {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 10;
+}
+.product-suggestion {
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.product-suggestion:hover {
+  background: var(--surface-2);
+}
+
+.csv-mapping-box {
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.batch-card .toggle-expand {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
 /* ---------------- Mobile (tested down to 360px, Galaxy S8+) ---------------- */
 
 @media (max-width: 480px) {
@@ -519,9 +565,10 @@ main.container {
   }
   .date-group-head .actions {
     width: 100%;
+    flex-wrap: wrap;
   }
   .date-group-head .actions button {
-    flex: 1;
+    flex: 1 1 auto;
   }
 
   .order-row {

@@ -78,6 +78,9 @@ async function paint(root, session) {
 
   if (activeView === "notes") {
     await paintNotesView(root, session);
+  } else if (activeView === "prebook") {
+    const { renderPrebook } = await import("./prebook.js");
+    await renderPrebook(root.querySelector("#view-body"), session, profile);
   } else {
     await paintWarehouseView(root, session);
   }
@@ -150,6 +153,7 @@ function renderTabs(root, session) {
     .join("");
 
   tabsEl.innerHTML += `<div class="tab ${activeView === "notes" ? "active" : ""}" id="notes-tab">Notes</div>`;
+  tabsEl.innerHTML += `<div class="tab ${activeView === "prebook" ? "active" : ""}" id="prebook-tab">Prebook</div>`;
 
   tabsEl.querySelectorAll(".tab[data-id]").forEach((el) => {
     el.addEventListener("click", async () => {
@@ -161,6 +165,11 @@ function renderTabs(root, session) {
 
   tabsEl.querySelector("#notes-tab").addEventListener("click", async () => {
     activeView = "notes";
+    await paint(root, session);
+  });
+
+  tabsEl.querySelector("#prebook-tab").addEventListener("click", async () => {
+    activeView = "prebook";
     await paint(root, session);
   });
 }

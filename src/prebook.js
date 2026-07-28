@@ -138,7 +138,7 @@ function renderBatchCard(b, profile) {
           <button class="edit-stock" data-id="${b.id}">Edit stock</button>
           <button class="edit-date" data-id="${b.id}">Edit date</button>
           <button class="export-batch" data-id="${b.id}">Export</button>
-          ${canDelete ? `<button class="ghost delete-batch" data-id="${b.id}" title="Delete pre-book">✕</button>` : ""}
+          ${canDelete ? `<button class="ghost icon-btn delete-batch" data-id="${b.id}" title="Delete pre-book">✕</button>` : ""}
         </div>
       </div>
       <button class="ghost toggle-expand" data-id="${b.id}" style="margin-bottom:10px">${expanded ? "Hide" : "Show"} orders (${claimed})</button>

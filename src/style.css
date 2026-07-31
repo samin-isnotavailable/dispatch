@@ -59,7 +59,7 @@ button {
   background: var(--surface-2);
   color: var(--ink);
   border-radius: var(--radius);
-  padding: 10px 14px;
+  padding: 8px 14px;
   font-weight: 500;
   transition: background 0.12s ease, border-color 0.12s ease, transform 0.05s ease;
 }
@@ -103,30 +103,31 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* Icon-only buttons: fixed 44x44 touch target with a centered vector icon,
-   replacing ad-hoc emoji glyphs so sizing/color is controllable via CSS. */
+/* Icon-only buttons: compact centered vector icon, replacing ad-hoc emoji
+   glyphs so sizing/color is controllable via CSS. */
 .icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   flex: 0 0 auto;
 }
 .icon-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 
-/* Wraps the "done" checkbox in a 44x44 tappable area without inflating
-   the visible 18px checkbox itself. */
+/* Small tappable wrapper around the "done" checkbox, close to the row's
+   left edge rather than centered in a large hit box. */
 .order-check {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 26px;
+  height: 26px;
+  margin-left: -4px;
   flex-shrink: 0;
   cursor: pointer;
 }
@@ -316,9 +317,6 @@ main.container {
 .date-group-head .actions button {
   font-size: 12px;
   padding: 6px 10px;
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
 }
 
 .order-list {
@@ -706,6 +704,13 @@ main.container {
   .order-row .time,
   .batch-row .expected {
     margin-left: 0;
+  }
+  /* Force these onto their own full-width line instead of an
+     unpredictable partial wrap that shoves time/icons around
+     differently row to row depending on badge text length. */
+  .order-row .exception-badge,
+  .order-row .moved-from {
+    flex-basis: 100%;
   }
   .batch-row .batch-status {
     flex: 1 1 auto;

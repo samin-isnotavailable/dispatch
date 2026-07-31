@@ -1,4 +1,6 @@
 import { supabase } from "./supabaseClient.js";
+import { iconX, iconFlag, iconRotate } from "./icons.js";
+import { showAlert, showConfirm } from "./dialogs.js";
 
 let profile = null;
 let warehouses = [];
@@ -145,15 +147,16 @@ async function paintNotesView(root, session) {
 
 function renderTabs(root, session) {
   const tabsEl = root.querySelector("#tabs");
+  tabsEl.setAttribute("role", "tablist");
   tabsEl.innerHTML = warehouses
-    .map(
-      (w) =>
-        `<div class="tab ${activeView === "warehouse" && w.id === activeWarehouseId ? "active" : ""}" data-id="${w.id}">${escapeHtml(w.name)}</div>`
-    )
+    .map((w) => {
+      const active = activeView === "warehouse" && w.id === activeWarehouseId;
+      return `<div class="tab ${active ? "active" : ""}" data-id="${w.id}" role="tab" tabindex="0" aria-selected="${active}">${escapeHtml(w.name)}</div>`;
+    })
     .join("");
 
-  tabsEl.innerHTML += `<div class="tab ${activeView === "notes" ? "active" : ""}" id="notes-tab">Notes</div>`;
-  tabsEl.innerHTML += `<div class="tab ${activeView === "prebook" ? "active" : ""}" id="prebook-tab">Prebook</div>`;
+  tabsEl.innerHTML += `<div class="tab ${activeView === "notes" ? "active" : ""}" id="notes-tab" role="tab" tabindex="0" aria-selected="${activeView === "notes"}">Notes</div>`;
+  tabsEl.innerHTML += `<div class="tab ${activeView === "prebook" ? "active" : ""}" id="prebook-tab" role="tab" tabindex="0" aria-selected="${activeView === "prebook"}">Prebook</div>`;
 
   tabsEl.querySelectorAll(".tab[data-id]").forEach((el) => {
     el.addEventListener("click", async () => {
@@ -171,6 +174,17 @@ function renderTabs(root, session) {
   tabsEl.querySelector("#prebook-tab").addEventListener("click", async () => {
     activeView = "prebook";
     await paint(root, session);
+  });
+
+  // Tabs are divs (not native buttons) so they need explicit keyboard
+  // activation to be operable without a mouse.
+  tabsEl.querySelectorAll(".tab").forEach((el) => {
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        el.click();
+      }
+    });
   });
 }
 
@@ -198,7 +212,7 @@ function renderManualAdd(root, session) {
       created_by: session.user.id,
     });
     if (error) {
-      alert(`Couldn't add order: ${error.message}`);
+      await showAlert(`Couldn't add order: ${error.message}`);
       return;
     }
     input.value = "";
@@ -272,14 +286,16 @@ function renderDateGroups(root, session) {
                 const movedFromLabel = getMovedFromLabel(o);
                 return `
               <div class="order-row ${o.done ? "done" : ""} ${o.exception_type ? "exception" : ""}">
-                <input type="checkbox" data-id="${o.id}" ${o.done ? "checked" : ""} ${canEdit && !o.exception_type ? "" : "disabled"} />
+                <label class="order-check" aria-label="Mark order ${escapeHtml(o.order_id)} as ${o.done ? "not done" : "done"}">
+                  <input type="checkbox" data-id="${o.id}" ${o.done ? "checked" : ""} ${canEdit && !o.exception_type ? "" : "disabled"} />
+                </label>
                 <span class="order-id">${escapeHtml(o.order_id)}</span>
                 ${flagLabel ? `<span class="exception-badge">${escapeHtml(flagLabel)}</span>` : ""}
                 ${movedFromLabel ? `<span class="moved-from">${escapeHtml(movedFromLabel)}</span>` : ""}
                 <span class="time">${formatTime(o.created_at)}</span>
-                ${canEdit && !o.exception_type ? `<button class="ghost flag-incomplete" data-id="${o.id}" title="Mark incomplete">⚑</button>` : ""}
-                ${canEdit && o.exception_type ? `<button class="ghost clear-exception" data-id="${o.id}" title="Clear flag">↺</button>` : ""}
-                ${profile.role === "super_admin" ? `<button class="ghost delete-order" data-id="${o.id}" title="Delete order">✕</button>` : ""}
+                ${canEdit && !o.exception_type ? `<button class="ghost icon-btn flag-incomplete" data-id="${o.id}" title="Mark incomplete" aria-label="Mark order ${escapeHtml(o.order_id)} as incomplete">${iconFlag}</button>` : ""}
+                ${canEdit && o.exception_type ? `<button class="ghost icon-btn clear-exception" data-id="${o.id}" title="Clear flag" aria-label="Clear exception flag for order ${escapeHtml(o.order_id)}">${iconRotate}</button>` : ""}
+                ${profile.role === "super_admin" ? `<button class="ghost icon-btn delete-order" data-id="${o.id}" title="Delete order" aria-label="Delete order ${escapeHtml(o.order_id)}">${iconX}</button>` : ""}
               </div>`;
               })
               .join("")}
@@ -295,7 +311,7 @@ function renderDateGroups(root, session) {
         .update({ done: cb.checked })
         .eq("id", cb.dataset.id);
       if (error) {
-        alert(`Couldn't update order: ${error.message}`);
+        await showAlert(`Couldn't update order: ${error.message}`);
         cb.checked = !cb.checked;
         return;
       }
@@ -310,7 +326,7 @@ function renderDateGroups(root, session) {
       if (!ids.length) return;
       const { error } = await supabase.from("orders").update({ done: true }).in("id", ids);
       if (error) {
-        alert(`Couldn't mark all complete: ${error.message}`);
+        await showAlert(`Couldn't mark all complete: ${error.message}`);
         return;
       }
       await loadOrdersForActiveWarehouse(root, session);
@@ -319,10 +335,10 @@ function renderDateGroups(root, session) {
 
   container.querySelectorAll(".delete-order").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!confirm("Delete this order? This can't be undone.")) return;
+      if (!(await showConfirm("Delete this order? This can't be undone.", { confirmLabel: "Delete", danger: true }))) return;
       const { error } = await supabase.from("orders").delete().eq("id", btn.dataset.id);
       if (error) {
-        alert(`Couldn't delete order: ${error.message}`);
+        await showAlert(`Couldn't delete order: ${error.message}`);
         return;
       }
       await loadOrdersForActiveWarehouse(root, session);
@@ -411,7 +427,7 @@ function openExceptionDialog(order, root, session) {
     const selected = overlay.querySelector('input[name="exception-reason"]:checked').value;
     const note = noteBox.value.trim();
     if (selected === "other" && !note) {
-      alert('Add a quick note for "Other".');
+      await showAlert('Add a quick note for "Other".');
       return;
     }
     overlay.remove();
@@ -433,7 +449,7 @@ async function applyException(order, type, note, root, session) {
       .select()
       .single();
     if (insertError) {
-      alert(`Couldn't reschedule: ${insertError.message}`);
+      await showAlert(`Couldn't reschedule: ${insertError.message}`);
       return;
     }
     const { error: updateError } = await supabase
@@ -441,7 +457,7 @@ async function applyException(order, type, note, root, session) {
       .update({ exception_type: "rescheduled", rescheduled_to_id: newOrder.id })
       .eq("id", order.id);
     if (updateError) {
-      alert(`Couldn't flag original order: ${updateError.message}`);
+      await showAlert(`Couldn't flag original order: ${updateError.message}`);
       return;
     }
   } else {
@@ -450,7 +466,7 @@ async function applyException(order, type, note, root, session) {
       .update({ exception_type: type, exception_note: type === "other" ? note : null })
       .eq("id", order.id);
     if (error) {
-      alert(`Couldn't update order: ${error.message}`);
+      await showAlert(`Couldn't update order: ${error.message}`);
       return;
     }
   }
@@ -458,13 +474,13 @@ async function applyException(order, type, note, root, session) {
 }
 
 async function clearException(order, root, session) {
-  if (!confirm("Clear this flag and restore the order to normal?")) return;
+  if (!(await showConfirm("Clear this flag and restore the order to normal?", { confirmLabel: "Clear" }))) return;
   const { error } = await supabase
     .from("orders")
     .update({ exception_type: null, exception_note: null, rescheduled_to_id: null })
     .eq("id", order.id);
   if (error) {
-    alert(`Couldn't clear flag: ${error.message}`);
+    await showAlert(`Couldn't clear flag: ${error.message}`);
     return;
   }
   await loadOrdersForActiveWarehouse(root, session);

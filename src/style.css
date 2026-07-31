@@ -11,7 +11,7 @@
 
   --ink: #eef2f8;
   --ink-secondary: #a6b3c9;
-  --ink-muted: #6d7d99;
+  --ink-muted: #8a97ad;
 
   /* Blue-violet accent — from gradient color inspo */
   --accent: #6C63FF;
@@ -59,7 +59,7 @@ button {
   background: var(--surface-2);
   color: var(--ink);
   border-radius: var(--radius);
-  padding: 8px 14px;
+  padding: 10px 14px;
   font-weight: 500;
   transition: background 0.12s ease, border-color 0.12s ease, transform 0.05s ease;
 }
@@ -86,6 +86,52 @@ button.ghost {
 button.ghost:hover {
   background: var(--surface-2);
   border-color: transparent;
+}
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+button.danger:hover {
+  background: #ff8080;
+  border-color: #ff8080;
+}
+input:disabled,
+select:disabled,
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Icon-only buttons: fixed 44x44 touch target with a centered vector icon,
+   replacing ad-hoc emoji glyphs so sizing/color is controllable via CSS. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  flex: 0 0 auto;
+}
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Wraps the "done" checkbox in a 44x44 tappable area without inflating
+   the visible 18px checkbox itself. */
+.order-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.order-check:has(input:disabled) {
+  cursor: not-allowed;
 }
 
 input[type="text"],
@@ -270,6 +316,9 @@ main.container {
 .date-group-head .actions button {
   font-size: 12px;
   padding: 6px 10px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .order-list {
@@ -304,8 +353,6 @@ main.container {
   color: var(--ink-muted);
 }
 .order-row .delete-order {
-  padding: 4px 8px;
-  font-size: 13px;
   color: var(--ink-muted);
   border-radius: 6px;
 }
@@ -331,10 +378,18 @@ main.container {
   font-style: italic;
   white-space: nowrap;
 }
+.variant-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent-ink);
+  background: var(--border-strong);
+  padding: 1px 7px;
+  border-radius: 7px;
+  white-space: nowrap;
+}
 .order-row .flag-incomplete,
 .order-row .clear-exception {
-  padding: 4px 8px;
-  font-size: 13px;
   color: var(--ink-muted);
   border-radius: 6px;
 }
@@ -369,6 +424,22 @@ main.container {
   font-family: var(--font-display);
   font-size: 15px;
   margin: 0 0 16px;
+}
+.dialog-message {
+  margin: 0 0 16px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.field-label {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin: 0 0 4px;
+}
+.exception-dialog input[type="text"],
+.exception-dialog input[type="number"],
+.exception-dialog input[type="date"] {
+  margin-bottom: 4px;
 }
 .exception-option {
   display: flex;
@@ -520,6 +591,44 @@ main.container {
   width: 100%;
 }
 
+.prebook-search {
+  margin-bottom: 16px;
+}
+.prebook-search input {
+  width: 100%;
+}
+
+/* A brand group reuses .date-group exactly (same card the dispatch view
+   uses) — brand name where a date would be, pre-book count where the
+   done-count would be. Each pre-book below it is a compact .order-row
+   instead of its own boxed card, matching the dispatch order list. */
+.batch-row .expected {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.batch-row .stock-summary {
+  font-size: 12px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.batch-row .batch-status {
+  flex: 0 0 auto;
+}
+.toggle-expand svg {
+  transition: transform 0.15s ease;
+}
+.toggle-expand.expanded svg {
+  transform: rotate(180deg);
+}
+.batch-expand {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin: -2px 0 6px;
+}
+
 .product-combobox {
   position: relative;
 }
@@ -550,43 +659,6 @@ main.container {
   border-radius: var(--radius);
   padding: 12px;
   margin-bottom: 12px;
-}
-
-.batch-card .toggle-expand {
-  font-size: 12px;
-  padding: 6px 10px;
-}
-
-/* The batch card packs a long product title, a meta line, a status
-   dropdown, and up to 4 buttons into one header — .date-group-head's
-   default single-row layout can't hold all of that without crowding.
-   Stack title above actions instead, and let actions wrap onto their
-   own line(s) at any screen width. */
-.batch-card .date-group-head {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 12px;
-}
-.batch-card .title {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-}
-.batch-card .title h3 {
-  line-height: 1.35;
-}
-.batch-card .actions {
-  flex-wrap: wrap;
-  row-gap: 8px;
-}
-
-/* Icon-only buttons (like the ✕ delete) shouldn't stretch to fill a
-   row the way text buttons do — without this, a lone leftover button
-   on mobile stretches full-width and its ✕ ends up floating centered. */
-.date-group-head .actions .icon-btn {
-  flex: 0 0 auto;
-  padding-left: 10px;
-  padding-right: 10px;
 }
 
 /* ---------------- Mobile (tested down to 360px, Galaxy S8+) ---------------- */
@@ -631,8 +703,12 @@ main.container {
   .order-row {
     flex-wrap: wrap;
   }
-  .order-row .time {
+  .order-row .time,
+  .batch-row .expected {
     margin-left: 0;
+  }
+  .batch-row .batch-status {
+    flex: 1 1 auto;
   }
 
   .admin-form {

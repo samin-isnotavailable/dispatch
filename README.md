@@ -34,6 +34,14 @@ Manifest v3 browser extension for capture.
   Postgres Row Level Security, not just UI conditionals — the rules hold
   even if the frontend has a bug.
 - **Personal notes** — a private, autosaving scratchpad per user.
+- **Pre-book tracking** — a separate tab for incoming stock: create a
+  pre-book batch for a product against an expected arrival date, claim
+  customer orders against it as they come in, and see stock/claimed/
+  available at a glance. Products can be added manually or bulk-imported
+  via CSV (with optional brand-column mapping), and the batch list is
+  searchable by product/brand/SKU and grouped by brand.
+- **Admin panel** (`/admin`, super_admin only) — create staff accounts,
+  assign roles/warehouses, and add warehouses, all from the UI.
 
 ## Tech stack
 
@@ -65,17 +73,18 @@ Manifest v3 browser extension for capture.
      warehouses.
    - `supabase/migrations/0002_notes.sql` — adds the personal notes
      table.
-3. **Authentication → Users** — create an account for yourself and each
-   staff member (email + password is enough).
-4. **Table editor → profiles** — for each user, set:
-   - `role` → `super_admin` (you) or `staff` (everyone else)
-   - `warehouse_id` → the staff member's assigned warehouse (leave blank
-     for super_admin)
+   - `supabase/migrations/0003_products_brand.sql` — adds an optional
+     `brand` column to `products`, used to group the pre-book list by
+     brand (falls back to the first word of the product name until
+     backfilled).
+3. **Authentication → Users** — create an account for yourself. This
+   becomes your first `super_admin`; every account after this one can be
+   created from the in-app Admin panel instead.
+4. **Table editor → profiles** — for that first account, set:
+   - `role` → `super_admin`
+   - `warehouse_id` → leave blank
 5. **Settings → API** — copy the **Project URL** and **anon public key**
    (you'll need both next).
-
-> There's no admin UI for assigning roles yet — do it from the Supabase
-> table editor for now. See [Roadmap](#roadmap).
 
 ### 2. Dashboard (local)
 
@@ -88,9 +97,15 @@ npm run dev
 
 ### 3. Deploy
 
-Push to GitHub, import the repo in Vercel, and set the same two
-environment variables in the Vercel project settings. Vercel auto-detects
-the Vite build.
+Push to GitHub, import the repo in Vercel, and set these environment
+variables in the Vercel project settings. Vercel auto-detects the Vite
+build.
+
+- `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` — same values as `.env`.
+- `SUPABASE_SERVICE_ROLE_KEY` — from Supabase **Settings → API**. Powers
+  the `api/admin-create-user` and `api/admin-delete-user` serverless
+  functions the Admin panel calls. Keep this server-side only — never
+  prefix it with `VITE_`, which would expose it to the browser bundle.
 
 ### 4. Browser extension
 
@@ -115,8 +130,15 @@ dispatchez/
 │   ├── main.js
 │   ├── auth.js
 │   ├── dashboard.js
+│   ├── prebook.js           # pre-book batches + claimed-order tracking
+│   ├── admin.js              # /admin panel (users, roles, warehouses)
+│   ├── dialogs.js            # themed alert/confirm/prompt replacements
+│   ├── icons.js              # inline SVG icon set
 │   ├── supabaseClient.js
 │   └── style.css
+├── api/                      # Vercel serverless functions
+│   ├── admin-create-user.js
+│   └── admin-delete-user.js
 ├── copy-extension/     # Browser extension (Manifest v3)
 │   ├── manifest.json
 │   ├── background.js        # builds the context menu, saves captures
@@ -125,14 +147,13 @@ dispatchez/
 │   └── config.js
 ├── supabase/migrations/
 │   ├── 0001_init.sql
-│   └── 0002_notes.sql
+│   ├── 0002_notes.sql
+│   └── 0003_products_brand.sql
 └── index.html
 ```
 
 ## Roadmap
 
-- Admin UI for assigning staff roles/warehouses (currently Supabase
-  table editor only)
 - Bulk import of order IDs
 - Per-warehouse export history / archive view
 

@@ -1,4 +1,6 @@
 import { supabase } from "./supabaseClient.js";
+import { iconX, iconRotate } from "./icons.js";
+import { showConfirm } from "./dialogs.js";
 
 export async function renderAdminPanel(root, session) {
   const { data: profile } = await supabase
@@ -48,7 +50,7 @@ async function paint(root, session, warehouses) {
             <input type="text" id="new-email" placeholder="Email" required />
             <div class="password-field span-2">
               <input type="text" id="new-password" placeholder="Temporary password" value="${generatePassword()}" required />
-              <button type="button" class="ghost" id="regen-password" title="Generate a new password">↻</button>
+              <button type="button" class="ghost icon-btn" id="regen-password" title="Generate a new password" aria-label="Generate a new password">${iconRotate}</button>
             </div>
             <select id="new-role">
               <option value="staff">Staff</option>
@@ -58,7 +60,7 @@ async function paint(root, session, warehouses) {
               ${warehouses.map((w) => `<option value="${w.id}">${escapeHtml(w.name)}</option>`).join("")}
             </select>
             <button type="submit" class="primary span-2">Create user</button>
-            <p id="create-status" class="span-2"></p>
+            <p id="create-status" class="span-2" aria-live="polite"></p>
           </form>
         </div>
 
@@ -80,8 +82,8 @@ async function paint(root, session, warehouses) {
                     .join("")}
                 </select>
                 <button class="save-user" data-id="${p.id}">Save</button>
-                ${p.id !== session.user.id ? `<button class="ghost delete-user" data-id="${p.id}" title="Delete user">✕</button>` : ""}
-                <span class="save-status" data-id="${p.id}"></span>
+                ${p.id !== session.user.id ? `<button class="ghost icon-btn delete-user" data-id="${p.id}" title="Delete user" aria-label="Delete user ${escapeHtml(p.full_name || "this user")}">${iconX}</button>` : ""}
+                <span class="save-status" data-id="${p.id}" aria-live="polite"></span>
               </div>`
               )
               .join("")}
@@ -104,7 +106,7 @@ async function paint(root, session, warehouses) {
             <input type="text" id="new-warehouse-name" placeholder="New warehouse name" required style="flex:1" />
             <button type="submit" class="primary">Add</button>
           </form>
-          <p id="warehouse-status" style="font-size:13px;margin-top:8px"></p>
+          <p id="warehouse-status" style="font-size:13px;margin-top:8px" aria-live="polite"></p>
         </div>
       </main>
     </div>
@@ -188,7 +190,7 @@ async function paint(root, session, warehouses) {
       const id = btn.dataset.id;
       const row = root.querySelector(`.user-row[data-user-id="${id}"]`);
       const name = row?.querySelector(".user-name")?.textContent || "this user";
-      if (!confirm(`Delete ${name}? This permanently removes their login and can't be undone.`)) return;
+      if (!(await showConfirm(`Delete ${name}? This permanently removes their login and can't be undone.`, { confirmLabel: "Delete", danger: true }))) return;
 
       const statusEl = root.querySelector(`.save-status[data-id="${id}"]`);
       statusEl.textContent = "Deleting…";

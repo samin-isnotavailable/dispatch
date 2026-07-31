@@ -1,10 +1,13 @@
 import Papa from "papaparse";
 import { supabase } from "./supabaseClient.js";
+import { iconX, iconChevronDown, iconPencil, iconDownload } from "./icons.js";
+import { showAlert, showConfirm, showEditBatch } from "./dialogs.js";
 
 let products = [];
 let batches = [];
 let orders = [];
 let statusFilter = "active";
+let searchQuery = "";
 let expandedBatchId = null;
 let selectedProductId = null;
 let csvParsedRows = null;
@@ -49,7 +52,7 @@ async function fetchAllProducts() {
   while (true) {
     const { data, error } = await supabase
       .from("products")
-      .select("id, name, sku")
+      .select("id, name, sku, brand")
       .order("name")
       .range(from, from + pageSize - 1);
     if (error) {
@@ -64,10 +67,6 @@ async function fetchAllProducts() {
 }
 
 function render(body, session, profile) {
-  const visibleBatches = batches
-    .filter((b) => b.status === statusFilter)
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
   body.innerHTML = `
     <div class="date-group">
       <div class="date-group-head">
@@ -80,10 +79,11 @@ function render(body, session, profile) {
       <div id="csv-mapping"></div>
       <div class="manual-add">
         <input type="text" id="new-product-name" placeholder="Product name" />
+        <input type="text" id="new-product-brand" placeholder="Brand (optional)" />
         <input type="text" id="new-product-sku" placeholder="SKU (optional)" />
         <button class="primary" id="add-product-btn">Add product</button>
       </div>
-      <p id="product-status" style="font-size:13px;margin:8px 0 0"></p>
+      <p id="product-status" style="font-size:13px;margin:8px 0 0" aria-live="polite"></p>
     </div>
 
     <div class="date-group">
@@ -96,55 +96,158 @@ function render(body, session, profile) {
         <input type="date" id="new-expected-date" />
         <input type="number" id="new-stock-qty" placeholder="Stock quantity" min="0" />
         <button class="primary" id="create-batch-btn">Create pre-book (Badda)</button>
-        <p id="create-batch-status" style="font-size:13px"></p>
+        <p id="create-batch-status" style="font-size:13px" aria-live="polite"></p>
       </div>
     </div>
 
-    <div class="tabs" id="status-tabs">
-      <div class="tab ${statusFilter === "active" ? "active" : ""}" data-status="active">Active</div>
-      <div class="tab ${statusFilter === "arrived" ? "active" : ""}" data-status="arrived">Arrived</div>
-      <div class="tab ${statusFilter === "closed" ? "active" : ""}" data-status="closed">Closed</div>
+    <div class="tabs" id="status-tabs" role="tablist">
+      <div class="tab ${statusFilter === "active" ? "active" : ""}" data-status="active" role="tab" tabindex="0" aria-selected="${statusFilter === "active"}">Active</div>
+      <div class="tab ${statusFilter === "arrived" ? "active" : ""}" data-status="arrived" role="tab" tabindex="0" aria-selected="${statusFilter === "arrived"}">Arrived</div>
+      <div class="tab ${statusFilter === "closed" ? "active" : ""}" data-status="closed" role="tab" tabindex="0" aria-selected="${statusFilter === "closed"}">Closed</div>
     </div>
 
-    <div id="batch-list">
-      ${visibleBatches.length ? visibleBatches.map((b) => renderBatchCard(b, profile)).join("") : `<p class="empty-note">No ${statusFilter} pre-books.</p>`}
+    <div class="prebook-search">
+      <input type="text" id="prebook-search" placeholder="Search by product, brand, or SKU…" autocomplete="off" value="${escapeHtml(searchQuery)}" />
     </div>
+
+    <div id="batch-list">${renderBatchListHtml(profile)}</div>
   `;
 
   wireEvents(body, session, profile);
 }
 
-function renderBatchCard(b, profile) {
-  const product = products.find((p) => p.id === b.product_id);
+// Product lookups keyed once per render pass instead of re-scanning the
+// products array for every batch — matters once the catalog is thousands
+// of rows deep (see fetchAllProducts' pagination comment).
+function productFor(batch) {
+  return products.find((p) => p.id === batch.product_id);
+}
+
+// Product names follow a "Base Name - Variant - Variant" convention
+// (color, switch type, etc.) — everything after the first " - " is a
+// variation attribute, so each dash-separated chunk gets its own badge
+// instead of running on as part of the plain title.
+function formatProductName(name) {
+  const parts = name.split(" - ").map((p) => p.trim()).filter(Boolean);
+  if (parts.length <= 1) return escapeHtml(name);
+  const [base, ...variants] = parts;
+  const tags = variants.map((v) => `<span class="variant-tag">${escapeHtml(v)}</span>`).join(" ");
+  return `${escapeHtml(base)} ${tags}`;
+}
+
+function getBrand(product) {
+  const brand = (product?.brand || "").trim();
+  if (brand) return brand;
+  const name = (product?.name || "").trim();
+  return name ? name.split(/\s+/)[0] : "Other";
+}
+
+function getVisibleBatches() {
+  const q = searchQuery.trim().toLowerCase();
+  return batches.filter((b) => {
+    if (b.status !== statusFilter) return false;
+    if (!q) return true;
+    const product = productFor(b);
+    const name = (product?.name || "").toLowerCase();
+    const sku = (product?.sku || "").toLowerCase();
+    const brand = getBrand(product).toLowerCase();
+    return name.includes(q) || sku.includes(q) || brand.includes(q);
+  });
+}
+
+// Same-brand pre-books tend to ship and land the same day, so grouping by
+// brand does most of the work a date view would — sorted alphabetically,
+// with each group's batches ordered by expected date (undated last).
+function groupBatchesByBrand(visibleBatches) {
+  const groups = new Map();
+  for (const b of visibleBatches) {
+    const brand = getBrand(productFor(b));
+    const key = brand.toLowerCase();
+    if (!groups.has(key)) groups.set(key, { label: brand, items: [] });
+    groups.get(key).items.push(b);
+  }
+  for (const group of groups.values()) {
+    group.items.sort((a, b) => {
+      if (a.expected_date !== b.expected_date) {
+        if (!a.expected_date) return 1;
+        if (!b.expected_date) return -1;
+        return a.expected_date < b.expected_date ? -1 : 1;
+      }
+      return (productFor(a)?.name || "").localeCompare(productFor(b)?.name || "");
+    });
+  }
+  return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function renderBatchListHtml(profile) {
+  const visibleBatches = getVisibleBatches();
+  if (!visibleBatches.length) {
+    const message = searchQuery.trim()
+      ? `No ${statusFilter} pre-books match "${escapeHtml(searchQuery.trim())}".`
+      : `No ${statusFilter} pre-books.`;
+    return `<p class="empty-note">${message}</p>`;
+  }
+
+  return groupBatchesByBrand(visibleBatches)
+    .map(
+      (group) => `
+    <div class="date-group brand-group">
+      <div class="date-group-head">
+        <div class="title">
+          <h3>${escapeHtml(group.label)}</h3>
+          <span class="count">${group.items.length} pre-book${group.items.length === 1 ? "" : "s"}</span>
+        </div>
+      </div>
+      <div class="order-list">
+        ${group.items.map((b) => renderBatchRow(b, profile)).join("")}
+      </div>
+    </div>`
+    )
+    .join("");
+}
+
+// Re-renders just the batch list (not the whole page) so the search input
+// above it never loses focus mid-keystroke.
+function refreshBatchList(body, session, profile) {
+  body.querySelector("#batch-list").innerHTML = renderBatchListHtml(profile);
+  wireBatchListEvents(body, session, profile);
+}
+
+// One compact row per pre-book (mirrors the dispatch view's order rows),
+// grouped under its brand's date-group card instead of each batch getting
+// its own boxed card — that per-card chrome repeated for every product was
+// the "eye sore" being fixed here. Expanding claimed orders renders a panel
+// as a sibling block right after the row, still inside the brand card.
+function renderBatchRow(b, profile) {
+  const product = productFor(b);
   const batchOrders = orders.filter((o) => o.batch_id === b.id);
   const claimed = batchOrders.length;
   const available = b.stock_quantity - claimed;
   const expanded = expandedBatchId === b.id;
   const canDelete = profile.role === "super_admin";
+  const productName = escapeHtml(product?.name || "(deleted product)");
 
-  return `
-    <div class="date-group batch-card" data-batch-id="${b.id}">
-      <div class="date-group-head">
-        <div class="title">
-          <h3>${escapeHtml(product?.name || "(deleted product)")}${product?.sku ? ` <span class="moved-from">${escapeHtml(product.sku)}</span>` : ""}</h3>
-          <span class="count">${b.expected_date ? `Expected ${formatDateLabel(b.expected_date)} · ` : ""}Stock ${b.stock_quantity} · Claimed ${claimed} · Available ${available}</span>
-        </div>
-        <div class="actions">
-          <select class="batch-status" data-id="${b.id}">
-            <option value="active" ${b.status === "active" ? "selected" : ""}>Active</option>
-            <option value="arrived" ${b.status === "arrived" ? "selected" : ""}>Arrived</option>
-            <option value="closed" ${b.status === "closed" ? "selected" : ""}>Closed</option>
-          </select>
-          <button class="edit-stock" data-id="${b.id}">Edit stock</button>
-          <button class="edit-date" data-id="${b.id}">Edit date</button>
-          <button class="export-batch" data-id="${b.id}">Export</button>
-          ${canDelete ? `<button class="ghost icon-btn delete-batch" data-id="${b.id}" title="Delete pre-book">✕</button>` : ""}
-        </div>
-      </div>
-      <button class="ghost toggle-expand" data-id="${b.id}" style="margin-bottom:10px">${expanded ? "Hide" : "Show"} orders (${claimed})</button>
-      ${
-        expanded
-          ? `
+  const row = `
+    <div class="order-row batch-row" data-batch-id="${b.id}">
+      <span class="order-id">${formatProductName(product?.name || "(deleted product)")}</span>
+      ${product?.sku ? `<span class="moved-from">${escapeHtml(product.sku)}</span>` : ""}
+      <span class="expected">${b.expected_date ? formatDateLabel(b.expected_date) : "No date set"}</span>
+      <span class="stock-summary">Stock ${b.stock_quantity} · Claimed ${claimed} · Available ${available}</span>
+      <select class="batch-status" data-id="${b.id}">
+        <option value="active" ${b.status === "active" ? "selected" : ""}>Active</option>
+        <option value="arrived" ${b.status === "arrived" ? "selected" : ""}>Arrived</option>
+        <option value="closed" ${b.status === "closed" ? "selected" : ""}>Closed</option>
+      </select>
+      <button class="ghost icon-btn toggle-expand ${expanded ? "expanded" : ""}" data-id="${b.id}" title="${expanded ? "Hide" : "Show"} claimed orders" aria-label="${expanded ? "Hide" : "Show"} claimed orders for ${productName} (${claimed})">${iconChevronDown}</button>
+      <button class="ghost icon-btn edit-batch" data-id="${b.id}" title="Edit stock & date" aria-label="Edit stock and expected date for ${productName}">${iconPencil}</button>
+      <button class="ghost icon-btn export-batch" data-id="${b.id}" title="Export claimed orders" aria-label="Export claimed orders for ${productName}">${iconDownload}</button>
+      ${canDelete ? `<button class="ghost icon-btn delete-batch" data-id="${b.id}" title="Delete pre-book" aria-label="Delete pre-book for ${productName}">${iconX}</button>` : ""}
+    </div>`;
+
+  if (!expanded) return row;
+
+  const expandPanel = `
+    <div class="batch-expand" data-batch-id="${b.id}">
       <div class="manual-add">
         <input type="text" class="new-order-id" data-batch="${b.id}" placeholder="Order ID, e.g. WOO-3423" />
         <button class="primary add-claim-btn" data-batch="${b.id}">Add order</button>
@@ -158,16 +261,16 @@ function renderBatchCard(b, profile) {
           <div class="order-row">
             <span class="order-id">${escapeHtml(o.order_id)}</span>
             <span class="time">${formatTime(o.created_at)}</span>
-            <button class="ghost remove-claim" data-id="${o.id}" title="Remove claim">✕</button>
+            <button class="ghost icon-btn remove-claim" data-id="${o.id}" title="Remove claim" aria-label="Remove claim for order ${escapeHtml(o.order_id)}">${iconX}</button>
           </div>`
                 )
                 .join("")
             : `<p class="empty-note">No orders claimed yet.</p>`
         }
-      </div>`
-          : ""
-      }
+      </div>
     </div>`;
+
+  return row + expandPanel;
 }
 
 function wireEvents(body, session, profile) {
@@ -192,11 +295,12 @@ function wireEvents(body, session, profile) {
   // --- Manual add product ---
   body.querySelector("#add-product-btn").addEventListener("click", async () => {
     const name = body.querySelector("#new-product-name").value.trim();
+    const brand = body.querySelector("#new-product-brand").value.trim();
     const sku = body.querySelector("#new-product-sku").value.trim();
     const status = body.querySelector("#product-status");
     if (!name) return;
 
-    const { error } = await supabase.from("products").insert({ name, sku: sku || null });
+    const { error } = await supabase.from("products").insert({ name, brand: brand || null, sku: sku || null });
     if (error) {
       status.textContent = error.message.includes("duplicate") ? "That product already exists." : error.message;
       status.style.color = "var(--danger)";
@@ -205,6 +309,7 @@ function wireEvents(body, session, profile) {
     status.textContent = `Added "${name}".`;
     status.style.color = "var(--success)";
     body.querySelector("#new-product-name").value = "";
+    body.querySelector("#new-product-brand").value = "";
     body.querySelector("#new-product-sku").value = "";
     await loadData();
     render(body, session, profile);
@@ -223,7 +328,7 @@ function wireEvents(body, session, profile) {
     }
     const matches = products.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 8);
     suggestionsEl.innerHTML = matches
-      .map((p) => `<div class="product-suggestion" data-id="${p.id}">${escapeHtml(p.name)}${p.sku ? ` <span class="moved-from">${escapeHtml(p.sku)}</span>` : ""}</div>`)
+      .map((p) => `<div class="product-suggestion" data-id="${p.id}">${formatProductName(p.name)}${p.sku ? ` <span class="moved-from">${escapeHtml(p.sku)}</span>` : ""}</div>`)
       .join("");
     suggestionsEl.style.display = matches.length ? "block" : "none";
     suggestionsEl.querySelectorAll(".product-suggestion").forEach((el) => {
@@ -277,57 +382,65 @@ function wireEvents(body, session, profile) {
       expandedBatchId = null;
       render(body, session, profile);
     });
+    tab.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        tab.click();
+      }
+    });
   });
 
-  // --- Batch card actions ---
+  // --- Live product/brand/SKU search ---
+  // Only refreshes #batch-list (not a full render) so this input never
+  // loses focus mid-keystroke.
+  body.querySelector("#prebook-search").addEventListener("input", (e) => {
+    searchQuery = e.target.value;
+    refreshBatchList(body, session, profile);
+  });
+
+  wireBatchListEvents(body, session, profile);
+}
+
+function wireBatchListEvents(body, session, profile) {
   body.querySelectorAll(".batch-status").forEach((select) => {
     select.addEventListener("change", async () => {
       const { error } = await supabase.from("prebook_batches").update({ status: select.value }).eq("id", select.dataset.id);
       if (error) {
-        alert(`Couldn't update status: ${error.message}`);
+        await showAlert(`Couldn't update status: ${error.message}`);
         return;
       }
       await loadData();
-      render(body, session, profile);
+      refreshBatchList(body, session, profile);
     });
   });
 
-  body.querySelectorAll(".edit-stock").forEach((btn) => {
+  body.querySelectorAll(".edit-batch").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const b = batches.find((x) => x.id === btn.dataset.id);
-      const next = prompt("New stock quantity:", b?.stock_quantity ?? 0);
-      if (next === null) return;
-      const qty = parseInt(next, 10);
-      if (isNaN(qty) || qty < 0) return;
-      const { error } = await supabase.from("prebook_batches").update({ stock_quantity: qty }).eq("id", btn.dataset.id);
+      const result = await showEditBatch({ stock: b?.stock_quantity ?? 0, date: b?.expected_date || "" });
+      if (!result) return;
+      const qty = parseInt(result.stock, 10);
+      if (isNaN(qty) || qty < 0) {
+        await showAlert("Enter a valid stock quantity.");
+        return;
+      }
+      const { error } = await supabase
+        .from("prebook_batches")
+        .update({ stock_quantity: qty, expected_date: result.date || null })
+        .eq("id", btn.dataset.id);
       if (error) {
-        alert(`Couldn't update stock: ${error.message}`);
+        await showAlert(`Couldn't update pre-book: ${error.message}`);
         return;
       }
       await loadData();
-      render(body, session, profile);
-    });
-  });
-
-  body.querySelectorAll(".edit-date").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const b = batches.find((x) => x.id === btn.dataset.id);
-      const next = prompt("New expected delivery date (YYYY-MM-DD):", b?.expected_date || "");
-      if (next === null) return;
-      const { error } = await supabase.from("prebook_batches").update({ expected_date: next || null }).eq("id", btn.dataset.id);
-      if (error) {
-        alert(`Couldn't update date: ${error.message}`);
-        return;
-      }
-      await loadData();
-      render(body, session, profile);
+      refreshBatchList(body, session, profile);
     });
   });
 
   body.querySelectorAll(".export-batch").forEach((btn) => {
     btn.addEventListener("click", () => {
       const b = batches.find((x) => x.id === btn.dataset.id);
-      const product = products.find((p) => p.id === b.product_id);
+      const product = productFor(b);
       const batchOrders = orders.filter((o) => o.batch_id === b.id);
       exportBatchOrders(product?.name || "product", batchOrders);
     });
@@ -335,21 +448,21 @@ function wireEvents(body, session, profile) {
 
   body.querySelectorAll(".delete-batch").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!confirm("Delete this pre-book and all its order claims? This can't be undone.")) return;
+      if (!(await showConfirm("Delete this pre-book and all its order claims? This can't be undone.", { confirmLabel: "Delete", danger: true }))) return;
       const { error } = await supabase.from("prebook_batches").delete().eq("id", btn.dataset.id);
       if (error) {
-        alert(`Couldn't delete: ${error.message}`);
+        await showAlert(`Couldn't delete: ${error.message}`);
         return;
       }
       await loadData();
-      render(body, session, profile);
+      refreshBatchList(body, session, profile);
     });
   });
 
   body.querySelectorAll(".toggle-expand").forEach((btn) => {
     btn.addEventListener("click", () => {
       expandedBatchId = expandedBatchId === btn.dataset.id ? null : btn.dataset.id;
-      render(body, session, profile);
+      refreshBatchList(body, session, profile);
     });
   });
 
@@ -364,7 +477,7 @@ function wireEvents(body, session, profile) {
       const b = batches.find((x) => x.id === batchId);
       const claimed = orders.filter((o) => o.batch_id === batchId).length;
       if (claimed >= b.stock_quantity) {
-        if (!confirm(`This pre-book is already fully claimed (${claimed}/${b.stock_quantity}). Add anyway?`)) return;
+        if (!(await showConfirm(`This pre-book is already fully claimed (${claimed}/${b.stock_quantity}). Add anyway?`, { confirmLabel: "Add anyway" }))) return;
       }
 
       const { error } = await supabase.from("prebook_orders").insert({
@@ -373,11 +486,11 @@ function wireEvents(body, session, profile) {
         created_by: session.user.id,
       });
       if (error) {
-        alert(`Couldn't add order: ${error.message}`);
+        await showAlert(`Couldn't add order: ${error.message}`);
         return;
       }
       await loadData();
-      render(body, session, profile);
+      refreshBatchList(body, session, profile);
     };
 
     btn.addEventListener("click", submit);
@@ -391,14 +504,14 @@ function wireEvents(body, session, profile) {
 
   body.querySelectorAll(".remove-claim").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!confirm("Remove this order claim?")) return;
+      if (!(await showConfirm("Remove this order claim?", { confirmLabel: "Remove", danger: true }))) return;
       const { error } = await supabase.from("prebook_orders").delete().eq("id", btn.dataset.id);
       if (error) {
-        alert(`Couldn't remove: ${error.message}`);
+        await showAlert(`Couldn't remove: ${error.message}`);
         return;
       }
       await loadData();
-      render(body, session, profile);
+      refreshBatchList(body, session, profile);
     });
   });
 }
@@ -412,6 +525,10 @@ function renderCsvMapping(body, session, profile) {
         <select id="map-name-col">
           ${csvFields.map((f) => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join("")}
         </select>
+        <select id="map-brand-col">
+          <option value="">(no brand column — parsed from name)</option>
+          ${csvFields.map((f) => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join("")}
+        </select>
         <select id="map-sku-col">
           <option value="">(no SKU column)</option>
           ${csvFields.map((f) => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join("")}
@@ -423,11 +540,20 @@ function renderCsvMapping(body, session, profile) {
 
   mapping.querySelector("#confirm-import-btn").addEventListener("click", async () => {
     const nameCol = mapping.querySelector("#map-name-col").value;
+    const brandCol = mapping.querySelector("#map-brand-col").value;
     const skuCol = mapping.querySelector("#map-sku-col").value;
     const status = body.querySelector("#product-status");
 
     const rows = csvParsedRows
-      .map((r) => ({ name: (r[nameCol] || "").trim(), sku: skuCol ? (r[skuCol] || "").trim() || null : null }))
+      .map((r) => {
+        const row = { name: (r[nameCol] || "").trim(), sku: skuCol ? (r[skuCol] || "").trim() || null : null };
+        // Only include `brand` when a column is actually mapped — upsert sets
+        // whatever keys are present, so omitting it (vs. sending null) avoids
+        // wiping out brand on existing rows during a re-import that doesn't
+        // map a brand column.
+        if (brandCol) row.brand = (r[brandCol] || "").trim() || null;
+        return row;
+      })
       .filter((r) => r.name);
 
     if (!rows.length) {

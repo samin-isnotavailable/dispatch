@@ -260,7 +260,7 @@ function renderBatchRow(b, profile) {
                   (o) => `
           <div class="order-row">
             <span class="order-id">${escapeHtml(o.order_id)}</span>
-            <span class="time">${formatTime(o.created_at)}</span>
+            <span class="time">${formatDateTime(o.created_at)}</span>
             <button class="ghost icon-btn remove-claim" data-id="${o.id}" title="Remove claim" aria-label="Remove claim for order ${escapeHtml(o.order_id)}">${iconX}</button>
           </div>`
                 )
@@ -605,8 +605,15 @@ function formatDateLabel(dateKey) {
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 }
 
-function formatTime(iso) {
-  return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+// Claimed orders aren't grouped by date (batches are grouped by brand
+// instead), so unlike the dispatch view's order rows, each claim needs its
+// own date alongside the time — otherwise every claim on a batch looks
+// like it landed the same day it was viewed.
+function formatDateTime(iso) {
+  const d = new Date(iso);
+  const date = d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return `${date}, ${time}`;
 }
 
 function escapeHtml(str) {

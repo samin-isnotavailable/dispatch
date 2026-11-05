@@ -430,7 +430,8 @@ function renderDateGroups(root, session) {
   container.querySelectorAll(".export").forEach((btn) => {
     btn.addEventListener("click", () => {
       const dateKey = btn.dataset.date;
-      exportOrders(groups.get(dateKey), dateKey);
+      if (listMode === "products") exportProducts(groups.get(dateKey), dateKey);
+      else exportOrders(groups.get(dateKey), dateKey);
     });
   });
 }
@@ -685,9 +686,20 @@ async function clearException(order, root, session) {
 }
 
 function exportOrders(rows, dateKey) {
-  const text = rows.map(exportLine).join("\n");
+  downloadAndCopy(rows.map(exportLine).join("\n"), `${dateKey}.txt`);
+}
+
+// Products tab export: the pick list only, one product per line, e.g.
+// "VXE R1 Tri-Mode Gaming Mouse - Black x 3". Same totals as on screen
+// (cancelled / moved orders left out).
+function exportProducts(rows, dateKey) {
+  const { products } = aggregateProducts(rows);
+  downloadAndCopy(products.map((p) => `${p.name} x ${p.qty}`).join("\n"), `${dateKey}_products.txt`);
+}
+
+function downloadAndCopy(text, suffix) {
   const warehouseName = warehouses.find((w) => w.id === activeWarehouseId)?.name || "warehouse";
-  const filename = `${warehouseName}_${dateKey}.txt`;
+  const filename = `${warehouseName}_${suffix}`;
 
   const blob = new Blob([text], { type: "text/plain" });
   const url = URL.createObjectURL(blob);

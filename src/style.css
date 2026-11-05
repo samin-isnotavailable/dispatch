@@ -1340,3 +1340,42 @@ main.container {
     font-size: 20px;
   }
 }
+
+/* Statistics: filters and exports */
+.stats-product input {
+  min-width: 260px;
+}
+.stats-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.stats-actions button {
+  font-size: 13px;
+}
+.stats-card-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.stats-filter-note {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--accent-tint);
+  color: var(--ink-secondary);
+}
+@media (max-width: 480px) {
+  .stats-product input {
+    min-width: 0;
+  }
+  .stats-actions {
+    margin-left: 0;
+  }
+  .stats-actions button {
+    flex: 1 1 0;
+  }
+  .stats-card-head {
+    flex-wrap: wrap;
+  }
+}

@@ -5,7 +5,7 @@
 // is also in that table.
 
 import { supabase } from "./supabaseClient.js";
-import { computeStats, WEEKDAYS, addDaysKey, daysBetween, DISTRICTS } from "./statsCompute.js";
+import { computeStats, filterOptions, WEEKDAYS, addDaysKey, daysBetween, DISTRICTS } from "./statsCompute.js";
 
 const STATE_KEY = "dispatchez.statsFilters";
 const MAX_RANGE_DAYS = 366;
@@ -31,6 +31,10 @@ let state = loadState();
 let warehouses = [];
 let tips = [];
 let requestSeq = 0;
+let lastDataset = null;
+let lastStats = null;
+// CSV exports for the cards currently on screen, by index.
+let exportsReg = [];
 let scrollBound = false;
 
 export async function renderStats(body, { warehouses: whs }) {
@@ -56,6 +60,19 @@ export async function renderStats(body, { warehouses: whs }) {
           ${warehouses.map((w) => `<option value="${w.id}">${esc(w.name)}</option>`).join("")}
         </select>
       </label>
+      <label class="stats-field stats-product">
+        <span>Product</span>
+        <input type="text" id="stats-product" list="stats-product-list" placeholder="Any product, or part of a name" autocomplete="off" />
+        <datalist id="stats-product-list"></datalist>
+      </label>
+      <label class="stats-field">
+        <span>Sold by</span>
+        <select id="stats-soldby"></select>
+      </label>
+      <label class="stats-field">
+        <span>District</span>
+        <select id="stats-district"></select>
+      </label>
       <div class="stats-field">
         <span>Group by</span>
         <div class="view-toggle stats-gran" role="group" aria-label="Group charts by">
@@ -63,6 +80,10 @@ export async function renderStats(body, { warehouses: whs }) {
           <button type="button" data-gran="week">Week</button>
           <button type="button" data-gran="month">Month</button>
         </div>
+      </div>
+      <div class="stats-actions">
+        <button type="button" class="ghost" id="stats-clear" style="display:none">Clear filters</button>
+        <button type="button" id="stats-export-orders">Export orders</button>
       </div>
     </div>
     <p class="stats-range-label" id="stats-range-label"></p>
@@ -130,8 +151,49 @@ export async function renderStats(body, { warehouses: whs }) {
     })
   );
 
+  // Product / sold by / district filter the already-fetched range, so
+  // they redraw instantly without asking the database again.
+  const productEl = body.querySelector("#stats-product");
+  productEl.value = state.product;
+  let productTimer = null;
+  productEl.addEventListener("input", () => {
+    clearTimeout(productTimer);
+    productTimer = setTimeout(() => {
+      state.product = productEl.value.trim();
+      saveState();
+      redraw(body);
+    }, 250);
+  });
+  body.querySelector("#stats-soldby").addEventListener("change", (e) => {
+    state.soldBy = e.target.value;
+    saveState();
+    redraw(body);
+  });
+  body.querySelector("#stats-district").addEventListener("change", (e) => {
+    state.district = e.target.value;
+    saveState();
+    redraw(body);
+  });
+  body.querySelector("#stats-clear").addEventListener("click", () => {
+    state.product = "";
+    state.soldBy = "";
+    state.district = "";
+    productEl.value = "";
+    saveState();
+    redraw(body);
+  });
+  body.querySelector("#stats-export-orders").addEventListener("click", () => {
+    if (lastStats) exportOrders(lastStats);
+  });
+
   // One delegated handler for every card's Chart / Table switch.
   content.addEventListener("click", (e) => {
+    const csvBtn = e.target.closest("[data-csv]");
+    if (csvBtn) {
+      const x = exportsReg[Number(csvBtn.dataset.csv)];
+      if (x) downloadCsv(x.name, x.headers, x.rows);
+      return;
+    }
     const btn = e.target.closest("[data-view-toggle]");
     if (!btn) return;
     const card = btn.closest(".stats-card");
@@ -168,16 +230,71 @@ async function load(body) {
     return;
   }
 
-  const stats = computeStats(data, { from, to, granularity: state.granularity, warehouses });
+  lastDataset = data;
+  redraw(body);
+}
+
+function redraw(body) {
+  if (!lastDataset) return;
+  const content = body.querySelector("#stats-content");
+  const { from, to } = rangeFor(state);
+  fillFilterOptions(body, filterOptions(lastDataset));
+  const filters = { product: state.product, soldBy: state.soldBy, district: state.district };
+  const stats = computeStats(lastDataset, { from, to, granularity: state.granularity, warehouses, filters });
+  lastStats = stats;
   tips = [];
-  content.innerHTML = stats.kpi.orders ? renderAll(stats) : renderEmpty();
+  exportsReg = [];
+
+  const active = activeFilterLabels();
+  body.querySelector("#stats-clear").style.display = active.length ? "" : "none";
+  body.querySelector("#stats-range-label").textContent =
+    `${formatDay(from, true)} – ${formatDay(to, true)} · by dispatch date` + (active.length ? ` · ${active.join(" · ")}` : "");
+  content.innerHTML = stats.kpi.orders ? renderAll(stats) : renderEmpty(active.length > 0);
+}
+
+// Rebuild the Sold by / District / product choices from the fetched range,
+// keeping the current choice even if it has no orders in this range.
+function fillFilterOptions(body, opts) {
+  const soldEl = body.querySelector("#stats-soldby");
+  const sellers = new Set(opts.sellers);
+  const currentSeller = state.soldBy.startsWith("seller:") ? state.soldBy.slice(7) : null;
+  if (currentSeller) sellers.add(currentSeller);
+  soldEl.innerHTML =
+    `<option value="">Everyone</option><option value="website">Website orders</option><option value="manual">All manual orders</option>` +
+    [...sellers].sort((a, b) => a.localeCompare(b)).map((n) => `<option value="${escAttr(`seller:${n}`)}">${esc(n)}</option>`).join("");
+  soldEl.value = state.soldBy;
+
+  const distEl = body.querySelector("#stats-district");
+  const districts = [...opts.districts];
+  if (state.district && !districts.some((d) => d.code === state.district)) districts.push({ code: state.district, name: DISTRICTS[state.district] || "Unknown" });
+  distEl.innerHTML = `<option value="">All districts</option>` + districts.map((d) => `<option value="${escAttr(d.code)}">${esc(d.name)}</option>`).join("");
+  distEl.value = state.district;
+
+  body.querySelector("#stats-product-list").innerHTML = opts.products.map((n) => `<option value="${escAttr(n)}"></option>`).join("");
+}
+
+function activeFilterLabels() {
+  const out = [];
+  if (state.product) out.push(`product contains "${state.product}"`);
+  if (state.soldBy === "website") out.push("website orders");
+  else if (state.soldBy === "manual") out.push("manual orders");
+  else if (state.soldBy.startsWith("seller:")) out.push(`sold by ${state.soldBy.slice(7)}`);
+  if (state.district) out.push(DISTRICTS[state.district] || "unknown district");
+  return out;
 }
 
 // ---------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------
 
-function renderEmpty() {
+function renderEmpty(filtered = false) {
+  if (filtered) {
+    return `
+    <div class="stats-card">
+      <h3>No orders match these filters</h3>
+      <p class="stats-note">Try a longer period, or clear the product, sold by or district filter.</p>
+    </div>`;
+  }
   return `
     <div class="stats-card">
       <h3>No orders in this period</h3>
@@ -191,7 +308,12 @@ function renderAll(s) {
   const labels = s.buckets.map((b) => bucketLabel(b));
   const longLabels = s.buckets.map((b) => bucketLabel(b, true));
 
+  const productNote = state.product
+    ? `<p class="stats-note stats-filter-note">Product filter on: units and revenue count only products whose name contains "${esc(state.product)}". Each order's discount is shared out by line value, and delivery isn't included.</p>`
+    : "";
+  const G = capitalize(state.granularity);
   const kpis = `
+    ${productNote}
     <div class="stats-kpis">
       ${tile("Net revenue", money(k.net), "item value minus discounts")}
       ${tile("Orders", int(k.orders))}
@@ -228,6 +350,7 @@ function renderAll(s) {
       s.revenue.map((r, i) => [longLabels[i], int(r.orders), money(r.gross), money(r.discount), money(r.net), money(r.delivery)]),
       [false, true, true, true, true, true]
     ),
+    csv: { name: "revenue", headers: [G, "Orders", "Units", "Item value", "Discounts", "Net revenue", "Delivery charged"], rows: s.revenue.map((r, i) => [longLabels[i], r.orders, r.units, r.gross, r.discount, r.net, r.delivery]) },
   });
 
   const sourceColors = { website: SERIES[0], manual: SERIES[1], other: OTHER_COLOR };
@@ -243,6 +366,14 @@ function renderAll(s) {
           : `<p class="stats-note">No manual orders in this period.</p>`
       }`,
     table: table(["Source", "Orders", "Share", "Units", "Net revenue"], s.sources.map((x) => [sourceNames[x.key], int(x.orders), pct(x.share), int(x.units), money(x.net)]), [false, true, true, true, true]),
+    csv: {
+      name: "sales-by-source",
+      headers: ["Source", "Salesperson", "Orders", "Units", "Net revenue"],
+      rows: [
+        ...s.sources.filter((x) => x.key !== "manual").map((x) => [sourceNames[x.key], "", x.orders, x.units, x.net]),
+        ...s.sellers.map((x) => ["Manual", x.name, x.orders, x.units, x.net]),
+      ],
+    },
   });
 
   const couponCard = card({
@@ -252,6 +383,7 @@ function renderAll(s) {
     chart: s.coupons.length
       ? table(["Code", "Orders", "Discount given", "Net revenue"], s.coupons.map((x) => [x.code, int(x.orders), money(x.discount), money(x.net)]), [false, true, true, true])
       : `<p class="stats-note">No coupons used in this period.</p>`,
+    csv: s.coupons.length ? { name: "coupons", headers: ["Code", "Orders", "Discount given", "Net revenue"], rows: s.coupons.map((x) => [x.code, x.orders, x.discount, x.net]) } : null,
   });
 
   const heatCard = card({
@@ -268,6 +400,7 @@ function renderAll(s) {
       }),
       [false, true, false]
     ),
+    csv: { name: "orders-by-hour", headers: ["Day", ...Array.from({ length: 24 }, (_, h) => hourLabel(h)), "Total"], rows: s.heat.map((row, d) => [WEEKDAYS[d], ...row, row.reduce((a, b) => a + b, 0)]) },
   });
 
   // --- Products ----------------------------------------------------------
@@ -282,6 +415,7 @@ function renderAll(s) {
       tipFor: (i) => ({ title: longLabels[i], rows: [{ label: "Units", value: int(s.unitsByBucket[i]), strong: true }, { label: "Orders", value: int(s.revenue[i].orders) }] }),
     }),
     table: table([capitalize(state.granularity), "Units", "Orders"], s.revenue.map((r, i) => [longLabels[i], int(r.units), int(r.orders)]), [false, true, true]),
+    csv: { name: "units", headers: [G, "Units", "Orders"], rows: s.revenue.map((r, i) => [longLabels[i], r.units, r.orders]) },
   });
 
   const top = s.products.slice(0, 10);
@@ -303,6 +437,9 @@ function renderAll(s) {
           [false, true, true, true]
         )
       : `<p class="stats-note">No product has slowed down by half or more compared with the 90 days before this period.</p>`,
+    csv: s.slowMovers.length
+      ? { name: "slow-movers", headers: ["Product", "Units now", "Per day now", "Units, 90 days before", "Per day before", "Change", "Last sold before"], rows: s.slowMovers.map((x) => [x.name, x.now, x.perDayNow, x.before, x.perDayBefore, x.change, x.lastBefore || ""]) }
+      : null,
   });
 
   const productsCard = card({
@@ -311,6 +448,11 @@ function renderAll(s) {
     wide: true,
     noToggle: true,
     chart: productTable(s.products),
+    csv: {
+      name: "products",
+      headers: ["Product", "Brand", "Units", "Share of units", "Orders", "Revenue", "Avg price", "Lowest price", "Highest price", ...s.buckets.map((b, i) => `Units ${longLabels[i]}`)],
+      rows: s.products.map((p) => [p.name, p.name.trim().split(/\s+/)[0], p.units, p.share, p.orders, p.revenue, p.avgPrice ?? "", p.minPrice ?? "", p.maxPrice ?? "", ...p.unitsByBucket]),
+    },
   });
 
   const variantCard = card({
@@ -318,6 +460,7 @@ function renderAll(s) {
     subtitle: "Products sold in more than one variant, by units",
     noToggle: true,
     chart: s.variants.length ? variantList(s.variants) : `<p class="stats-note">No product sold in more than one variant in this period.</p>`,
+    csv: s.variants.length ? { name: "variants", headers: ["Product", "Variant", "Units", "Share"], rows: s.variants.flatMap((g) => g.variants.map((v) => [g.base, v.name, v.units, v.share])) } : null,
   });
 
   const brandCard = card({
@@ -325,6 +468,7 @@ function renderAll(s) {
     subtitle: "Share of units and of item revenue",
     chart: rankedBars(s.brands.map((b) => ({ label: b.name, value: b.units, display: `${int(b.units)} · ${pct(b.unitShare)}`, tip: { title: b.name, rows: [{ label: "Units", value: `${int(b.units)} (${pct(b.unitShare)})`, strong: true }, { label: "Revenue", value: `${money(b.revenue)} (${pct(b.revenueShare)})` }] } }))),
     table: table(["Brand", "Units", "Share of units", "Revenue", "Share of revenue"], s.brands.map((b) => [b.name, int(b.units), pct(b.unitShare), money(b.revenue), pct(b.revenueShare)]), [false, true, true, true, true]),
+    csv: { name: "brands", headers: ["Brand", "Units", "Share of units", "Revenue", "Share of revenue"], rows: s.brands.map((b) => [b.name, b.units, b.unitShare, b.revenue, b.revenueShare]) },
   });
 
   const pairsCard = card({
@@ -334,6 +478,7 @@ function renderAll(s) {
     chart: s.pairs.length
       ? table(["Products", "Orders"], s.pairs.map((p) => [`${p.a} + ${p.b}`, int(p.orders)]), [false, true])
       : `<p class="stats-note">No order in this period had two different products.</p>`,
+    csv: s.pairs.length ? { name: "bought-together", headers: ["Product A", "Product B", "Orders"], rows: s.pairs.map((p) => [p.a, p.b, p.orders]) } : null,
   });
 
   // --- Warehouses & districts --------------------------------------------
@@ -352,6 +497,7 @@ function renderAll(s) {
       }),
     }),
     table: table([capitalize(state.granularity), ...whSeries.map((w) => w.name), "Total"], s.buckets.map((b, i) => [longLabels[i], ...whSeries.map((w) => int(w.values[i])), int(whSeries.reduce((t, w) => t + w.values[i], 0))]), [false, ...whSeries.map(() => true), true]),
+    csv: { name: "warehouse-load", headers: [G, ...whSeries.map((w) => `${w.name} units`), "Total units"], rows: s.buckets.map((b, i) => [longLabels[i], ...whSeries.map((w) => w.values[i]), whSeries.reduce((t, w) => t + w.values[i], 0)]) },
   });
 
   const topDistricts = s.districts.slice(0, 12);
@@ -360,6 +506,7 @@ function renderAll(s) {
     subtitle: "Orders by delivery district",
     chart: rankedBars(topDistricts.map((d) => ({ label: d.name, value: d.orders, display: int(d.orders), tip: { title: d.name, rows: [{ label: "Orders", value: int(d.orders), strong: true }, { label: "Net revenue", value: money(d.net) }, { label: "Units", value: int(d.units) }] } }))),
     table: table(["District", "Orders", "Units", "Net revenue"], s.districts.map((d) => [d.name, int(d.orders), int(d.units), money(d.net)]), [false, true, true, true]),
+    csv: { name: "districts", headers: ["District", "Code", "Orders", "Units", "Net revenue"], rows: s.districts.map((d) => [d.name, d.code === "unknown" ? "" : d.code, d.orders, d.units, d.net]) },
   });
 
   // --- Customers ---------------------------------------------------------
@@ -370,18 +517,26 @@ function renderAll(s) {
       ${tile("Repeat rate", pct(c.repeatRate))}
       ${tile("Days between orders", c.avgGapDays == null ? "—" : c.avgGapDays.toFixed(0), "average, for repeat customers")}
     </div>`;
-  const repeatCard = card({
-    title: "Top repeat customers",
-    subtitle: "Order counts include every order up to the end of this period",
+  const shownCustomers = c.all.slice(0, 50);
+  const customersCard = card({
+    title: "Customers",
+    subtitle: `Everyone who ordered in this period${activeFilterLabels().length ? ", with the filters above" : ""}, most orders first${c.all.length > 50 ? ` (showing 50 of ${int(c.all.length)}; Export CSV has all of them)` : ""}`,
     wide: true,
     noToggle: true,
-    chart: c.top.length
+    chart: c.all.length
       ? table(
-          ["Customer", "Phone", "District", "Orders", "In this period", "Last order", "Days between orders", "Total spent"],
-          c.top.map((x) => [x.name || "—", x.phone || "—", DISTRICTS[x.district] || "—", int(x.orders), int(x.orders_in_range), x.last ? formatDay(x.last, true) : "—", x.avgGapDays == null ? "—" : x.avgGapDays.toFixed(0), money(x.spent)]),
+          ["Customer", "Phone", "District", "Orders here", "Orders ever", "Last order", "Days between orders", "Total spent ever"],
+          shownCustomers.map((x) => [x.name || "—", x.phone || "—", DISTRICTS[x.district] || "—", int(x.ordersHere), int(x.orders), x.last ? formatDay(x.last, true) : "—", x.avgGapDays == null ? "—" : x.avgGapDays.toFixed(0), money(x.spent)]),
           [false, false, false, true, true, false, true, true]
         )
-      : `<p class="stats-note">No repeat customers in this period yet.</p>`,
+      : `<p class="stats-note">No customers with a phone number in this period.</p>`,
+    csv: c.all.length
+      ? {
+          name: "customers",
+          headers: ["Customer", "Phone", "District", "Area", "Orders in period", "Net revenue in period", "Orders ever", "First order", "Last order", "Avg days between orders", "Total spent ever"],
+          rows: c.all.map((x) => [x.name || "", x.phone || "", DISTRICTS[x.district] || "", x.area || "", x.ordersHere, x.netHere, x.orders, x.first || "", x.last || "", x.avgGapDays ?? "", x.spent]),
+        }
+      : null,
   });
 
   return `
@@ -394,7 +549,7 @@ function renderAll(s) {
     <div class="stats-grid">${loadCard}${districtCard}</div>
     <h2 class="stats-section">Customers</h2>
     ${customerKpis}
-    <div class="stats-grid">${repeatCard}</div>
+    <div class="stats-grid">${customersCard}</div>
     <p class="stats-note stats-footnote">Counts orders sent from Zagle with product details, by dispatch date. Cancelled orders and the original row of a moved order are left out; an order ID recorded twice counts once.</p>
   `;
 }
@@ -407,7 +562,8 @@ function tile(label, value, note = "") {
   return `<div class="stats-tile"><div class="stats-tile-label">${esc(label)}</div><div class="stats-tile-value">${esc(value)}</div>${note ? `<div class="stats-tile-note">${esc(note)}</div>` : ""}</div>`;
 }
 
-function card({ title, subtitle, chart, table: tableHtml, wide = false, noToggle = false }) {
+function card({ title, subtitle, chart, table: tableHtml, wide = false, noToggle = false, csv = null }) {
+  const csvIdx = csv ? exportsReg.push({ ...csv, name: csvName(csv.name) }) - 1 : -1;
   return `
     <section class="stats-card ${wide ? "wide" : ""}">
       <div class="stats-card-head">
@@ -415,7 +571,10 @@ function card({ title, subtitle, chart, table: tableHtml, wide = false, noToggle
           <h3>${esc(title)}</h3>
           ${subtitle ? `<p class="stats-card-sub">${esc(subtitle)}</p>` : ""}
         </div>
-        ${!noToggle && tableHtml ? `<button type="button" class="ghost stats-view-btn" data-view-toggle aria-pressed="false">Table</button>` : ""}
+        <div class="stats-card-actions">
+          ${!noToggle && tableHtml ? `<button type="button" class="ghost stats-view-btn" data-view-toggle aria-pressed="false">Table</button>` : ""}
+          ${csv ? `<button type="button" class="ghost stats-view-btn" data-csv="${csvIdx}" title="Download as CSV (opens in Excel / Google Sheets)">Export CSV</button>` : ""}
+        </div>
       </div>
       <div class="stats-chart">${chart}</div>
       ${!noToggle && tableHtml ? `<div class="stats-table-view">${tableHtml}</div>` : ""}
@@ -601,6 +760,72 @@ function productTable(products) {
 }
 
 // ---------------------------------------------------------------------
+// CSV export. Numbers stay plain (no ৳ or commas) so spreadsheets can
+// add them up; a byte-order mark makes Excel read Bangla names correctly.
+// ---------------------------------------------------------------------
+
+function csvName(what) {
+  const { from, to } = rangeFor(state);
+  const bits = [what, from === to ? from : `${from}_to_${to}`];
+  const wh = warehouses.find((w) => w.id === state.warehouse);
+  if (wh) bits.push(wh.name);
+  if (state.district) bits.push(DISTRICTS[state.district] || "unknown-district");
+  if (state.soldBy.startsWith("seller:")) bits.push(state.soldBy.slice(7));
+  else if (state.soldBy) bits.push(state.soldBy);
+  if (state.product) bits.push(state.product);
+  return `${bits.join("_").replace(/[^\w.-]+/g, "-").replace(/-+/g, "-")}.csv`;
+}
+
+function csvCell(v) {
+  if (v == null) return "";
+  if (typeof v === "number") return Number.isFinite(v) ? String(Math.round(v * 100) / 100) : "";
+  const str = String(v);
+  return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+}
+
+function downloadCsv(name, headers, rows) {
+  const text = "\ufeff" + [headers, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
+  const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const dhakaDateTime = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dhaka", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
+// Every order in the current filters, one row each.
+function exportOrders(st) {
+  const whName = new Map(warehouses.map((w) => [w.id, w.name]));
+  const rows = st.orders
+    .slice()
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : String(a.id).localeCompare(String(b.id))))
+    .map((o) => [
+      o.id,
+      o.date,
+      whName.get(o.wh) || "",
+      o.placed ? dhakaDateTime.format(new Date(o.placed)) : "",
+      o.source === "website" ? "Website" : o.source === "manual" ? "Manual" : o.source || "",
+      o.source === "manual" ? o.sold_by || "" : "",
+      o.status || "",
+      o.name || "",
+      o.phone || "",
+      DISTRICTS[o.district] || "",
+      o.area || "",
+      o.address || "",
+      o.items.map((it) => `${it.name} x ${it.qty}`).join("; "),
+      o.units,
+      o.gross,
+      o.discount,
+      o.delivery,
+      o.net,
+      (o.coupons || []).join("; "),
+    ]);
+  downloadCsv(csvName("orders"), ["Order ID", "Dispatch date", "Warehouse", "Placed (Bangladesh time)", "Source", "Sold by", "Status", "Customer", "Phone", "District", "Area", "Address", "Products", "Units", "Item value", "Discount", "Delivery", "Net revenue", "Coupons"], rows);
+}
+
+// ---------------------------------------------------------------------
 // Tooltip: one floating element, filled with textContent only.
 // ---------------------------------------------------------------------
 
@@ -711,11 +936,18 @@ function defaultGranularity({ from, to }) {
 }
 
 function loadState() {
-  const fallback = { preset: "30d", from: "", to: "", warehouse: "", granularity: "day" };
+  const fallback = { preset: "30d", from: "", to: "", warehouse: "", granularity: "day", product: "", soldBy: "", district: "" };
   try {
     const saved = JSON.parse(localStorage.getItem(STATE_KEY) || "null");
     if (!saved || !PRESETS.some((p) => p.id === saved.preset)) return fallback;
-    return { ...fallback, ...saved, granularity: ["day", "week", "month"].includes(saved.granularity) ? saved.granularity : "day" };
+    return {
+      ...fallback,
+      ...saved,
+      granularity: ["day", "week", "month"].includes(saved.granularity) ? saved.granularity : "day",
+      product: typeof saved.product === "string" ? saved.product : "",
+      soldBy: typeof saved.soldBy === "string" ? saved.soldBy : "",
+      district: typeof saved.district === "string" ? saved.district : "",
+    };
   } catch {
     return fallback;
   }

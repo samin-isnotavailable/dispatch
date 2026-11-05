@@ -22,11 +22,12 @@ export const DISTRICTS = {
   "BD-61": "Sunamganj", "BD-62": "Shariatpur", "BD-63": "Tangail", "BD-64": "Thakurgaon",
 };
 
-export const WEEKDAYS = ["Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri"];
+// Weeks start on Wednesday, everywhere (week grouping and the heatmap).
+export const WEEKDAYS = ["Wed", "Thu", "Fri", "Sat", "Sun", "Mon", "Tue"];
 
 // ---------------------------------------------------------------------
 // Dates. Date keys are "YYYY-MM-DD" strings, handled as calendar days
-// (no time zone involved). Weeks start on Saturday.
+// (no time zone involved). Weeks start on Wednesday.
 // ---------------------------------------------------------------------
 
 const MS_DAY = 86400000;
@@ -44,8 +45,8 @@ export function daysBetween(a, b) {
 export function bucketOf(key, granularity) {
   if (granularity === "month") return `${key.slice(0, 7)}-01`;
   if (granularity === "week") {
-    const dow = new Date(toUtc(key)).getUTCDay(); // 0 = Sunday … 6 = Saturday
-    return addDaysKey(key, -((dow + 1) % 7));
+    const dow = new Date(toUtc(key)).getUTCDay(); // 0 = Sunday … 3 = Wednesday … 6 = Saturday
+    return addDaysKey(key, -((dow - 3 + 7) % 7));
   }
   return key;
 }
@@ -66,7 +67,7 @@ export function bucketKeys(from, to, granularity) {
   return keys;
 }
 
-// Weekday (Saturday-first index) and hour an order was placed, in
+// Weekday (index into WEEKDAYS) and hour an order was placed, in
 // Bangladesh time regardless of the viewer's own clock.
 const dhakaParts = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Dhaka",
@@ -109,11 +110,73 @@ function itemFigures(it) {
 }
 
 // ---------------------------------------------------------------------
+// Filters (run in the browser on the fetched range, so they're instant)
+// ---------------------------------------------------------------------
+
+export const districtKey = (code) => (code && DISTRICTS[code] ? code : "unknown");
+export const sellerName = (o) => (o.sold_by || "Unknown").trim() || "Unknown";
+
+// filters = { product, soldBy, district }
+//   product  — text; keeps orders with a product whose name contains it
+//              (case-insensitive), so "Dragonfly" matches every variant.
+//              Those orders are cut down to the matching products: units
+//              and revenue are that product's, the order's discount is
+//              shared out by line value, and delivery is left out.
+//   soldBy   — "website", "manual", or "seller:<name>"
+//   district — a BD code like "BD-13", or "unknown"
+export function applyFilters(orders, { product = "", soldBy = "", district = "" } = {}) {
+  const q = String(product || "").trim().toLowerCase();
+  const out = [];
+  for (const o of orders || []) {
+    if (soldBy === "website" && o.source !== "website") continue;
+    if (soldBy === "manual" && o.source !== "manual") continue;
+    if (soldBy.startsWith("seller:") && (o.source !== "manual" || sellerName(o) !== soldBy.slice(7))) continue;
+    if (district && districtKey(o.district) !== district) continue;
+    if (!q) {
+      out.push(o);
+      continue;
+    }
+    const items = o.items || [];
+    const matching = items.filter((it) => String(it.name).toLowerCase().includes(q));
+    if (!matching.length) continue;
+    const allTotal = items.reduce((t, it) => t + itemFigures(it).total, 0);
+    const matchTotal = matching.reduce((t, it) => t + itemFigures(it).total, 0);
+    const share = allTotal ? matchTotal / allTotal : 1;
+    const a = o.amounts || {};
+    out.push({ ...o, items: matching, amounts: { items: matchTotal, discount: Math.abs(num(a.discount) ?? 0) * share, delivery: 0 } });
+  }
+  return out;
+}
+
+// Choices for the filter controls, from the whole fetched range.
+export function filterOptions(dataset) {
+  const orders = dataset?.orders || [];
+  const products = new Set();
+  const sellers = new Set();
+  const districts = new Set();
+  for (const o of orders) {
+    for (const it of o.items || []) products.add(String(it.name));
+    if (o.source === "manual") sellers.add(sellerName(o));
+    districts.add(districtKey(o.district));
+  }
+  return {
+    products: [...products].sort((a, b) => a.localeCompare(b)),
+    sellers: [...sellers].sort((a, b) => a.localeCompare(b)),
+    districts: [...districts]
+      .map((code) => ({ code, name: DISTRICTS[code] || "Unknown" }))
+      .sort((a, b) => (a.code === "unknown") - (b.code === "unknown") || a.name.localeCompare(b.name)),
+  };
+}
+
+// ---------------------------------------------------------------------
 // The whole computation
 // ---------------------------------------------------------------------
 
-export function computeStats(dataset, { from, to, granularity, warehouses }) {
-  const orders = dataset?.orders || [];
+export function computeStats(dataset, { from, to, granularity, warehouses, filters }) {
+  const orders = applyFilters(dataset?.orders || [], filters);
+  const lifetime = new Map((dataset?.customers || []).map((c) => [c.phone, c]));
+  const custMap = new Map();
+  const orderRows = [];
   const buckets = bucketKeys(from, to, granularity);
   const bucketIndex = new Map(buckets.map((k, i) => [k, i]));
   const zeros = () => buckets.map(() => 0);
@@ -143,6 +206,20 @@ export function computeStats(dataset, { from, to, granularity, warehouses }) {
     const delivery = num(a.delivery) ?? 0;
     const net = gross - discount;
     const units = items.reduce((s, it) => s + it.qty, 0);
+
+    orderRows.push({ ...o, items, gross, discount, delivery, net, units });
+    if (o.phone) {
+      if (!custMap.has(o.phone)) custMap.set(o.phone, { phone: o.phone, name: o.name || null, district: o.district || null, area: o.area || null, ordersHere: 0, netHere: 0, lastHere: o.date });
+      const cu = custMap.get(o.phone);
+      cu.ordersHere += 1;
+      cu.netHere += net;
+      if (o.date >= cu.lastHere) {
+        cu.lastHere = o.date;
+        cu.name = o.name || cu.name;
+        cu.district = o.district || cu.district;
+        cu.area = o.area || cu.area;
+      }
+    }
 
     kpi.orders += 1;
     kpi.units += units;
@@ -191,13 +268,13 @@ export function computeStats(dataset, { from, to, granularity, warehouses }) {
     }
 
     const src = o.source === "website" ? "website" : o.source === "manual" ? "manual" : "other";
+    const who = sellerName(o);
     if (!sources.has(src)) sources.set(src, { key: src, orders: 0, units: 0, net: 0 });
     const s = sources.get(src);
     s.orders += 1;
     s.units += units;
     s.net += net;
     if (src === "manual") {
-      const who = (o.sold_by || "Unknown").trim() || "Unknown";
       if (!sellers.has(who)) sellers.set(who, { name: who, orders: 0, units: 0, net: 0 });
       const sl = sellers.get(who);
       sl.orders += 1;
@@ -214,7 +291,7 @@ export function computeStats(dataset, { from, to, granularity, warehouses }) {
       c.net += net / codes.length;
     }
 
-    const dcode = o.district && DISTRICTS[o.district] ? o.district : "unknown";
+    const dcode = districtKey(o.district);
     if (!districts.has(dcode)) districts.set(dcode, { code: dcode, name: DISTRICTS[dcode] || "Unknown", orders: 0, units: 0, net: 0 });
     const d = districts.get(dcode);
     d.orders += 1;
@@ -296,20 +373,33 @@ export function computeStats(dataset, { from, to, granularity, warehouses }) {
     .map(([id, values]) => ({ id, name: whName.get(id) || "Other", values, total: values.reduce((s, v) => s + v, 0), orders: whOrders.get(id) || 0 }))
     .filter((s) => s.total > 0 || s.orders > 0);
 
-  // --- Customers -------------------------------------------------------
-  const customers = (dataset?.customers || []).map((c) => {
-    const n = num(c.orders) || 0;
-    const span = c.first && c.last ? daysBetween(c.first, c.last) : 0;
-    return { ...c, orders: n, orders_in_range: num(c.orders_in_range) || 0, spent: num(c.spent) || 0, avgGapDays: n > 1 ? span / (n - 1) : null };
+  // --- Customers: everyone in the filtered orders; "repeat" and the
+  // lifetime figures come from their full history up to the range end.
+  const customerList = [...custMap.values()].map((cu) => {
+    const life = lifetime.get(cu.phone) || {};
+    const n = num(life.orders) || cu.ordersHere;
+    const span = life.first && life.last ? daysBetween(life.first, life.last) : 0;
+    return {
+      ...cu,
+      name: cu.name || life.name || null,
+      district: cu.district || life.district || null,
+      orders: n,
+      first: life.first || null,
+      last: life.last || cu.lastHere,
+      spent: num(life.spent) ?? cu.netHere,
+      avgGapDays: n > 1 ? span / (n - 1) : null,
+    };
   });
-  const repeaters = customers.filter((c) => c.orders > 1);
+  customerList.sort((x, y) => y.ordersHere - x.ordersHere || y.orders - x.orders || y.netHere - x.netHere);
+  const repeaters = customerList.filter((c) => c.orders > 1);
   const gaps = repeaters.map((c) => c.avgGapDays).filter((g) => g != null);
   const customerStats = {
-    unique: customers.length,
+    unique: customerList.length,
     repeat: repeaters.length,
-    repeatRate: customers.length ? repeaters.length / customers.length : 0,
-    avgGapDays: gaps.length ? gaps.reduce((s, g) => s + g, 0) / gaps.length : null,
-    top: repeaters.sort((x, y) => y.orders - x.orders || y.spent - x.spent).slice(0, 20),
+    repeatRate: customerList.length ? repeaters.length / customerList.length : 0,
+    avgGapDays: gaps.length ? gaps.reduce((t, g) => t + g, 0) / gaps.length : null,
+    all: customerList,
+    top: [...repeaters].sort((x, y) => y.orders - x.orders || y.spent - x.spent).slice(0, 20),
   };
 
   return {
@@ -334,5 +424,6 @@ export function computeStats(dataset, { from, to, granularity, warehouses }) {
     placedCount,
     pairs: pairList,
     customers: customerStats,
+    orders: orderRows,
   };
 }

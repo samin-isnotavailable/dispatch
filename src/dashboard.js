@@ -10,6 +10,17 @@ let activeView = "warehouse"; // "warehouse" | "notes"
 let realtimeChannel = null;
 let notesSaveTimer = null;
 
+// Orders / Products toggle above the date cards. Remembered per browser.
+const LIST_MODE_KEY = "dispatchez.listMode";
+let listMode = readListMode(); // "orders" | "products"
+// "Collected" ticks for the Products view, keyed by pickKey(date, name),
+// value = how many units were needed when it was ticked.
+let pickMarks = new Map();
+// Products currently on screen, so checkboxes can refer to them by index
+// instead of putting product names (which may contain quotes) in HTML
+// attributes.
+let renderedProducts = [];
+
 export async function renderDashboard(root, session) {
   const { data: profileRow, error: profileError } = await supabase
     .from("profiles")
@@ -96,8 +107,29 @@ async function paintWarehouseView(root, session) {
       <select id="manual-warehouse"></select>
       <button class="primary" id="manual-add-btn">Add order</button>
     </div>
+    <div class="view-toggle" role="group" aria-label="Show orders or products">
+      <button type="button" data-mode="orders">Orders</button>
+      <button type="button" data-mode="products">Products</button>
+    </div>
     <div id="date-groups"></div>
   `;
+  const toggleButtons = body.querySelectorAll(".view-toggle button");
+  const syncToggle = () =>
+    toggleButtons.forEach((b) => {
+      const on = b.dataset.mode === listMode;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-pressed", String(on));
+    });
+  syncToggle();
+  toggleButtons.forEach((b) =>
+    b.addEventListener("click", () => {
+      if (listMode === b.dataset.mode) return;
+      listMode = b.dataset.mode;
+      saveListMode(listMode);
+      syncToggle();
+      renderDateGroups(root, session);
+    })
+  );
   renderManualAdd(root, session);
   await loadOrdersForActiveWarehouse(root, session);
 }
@@ -246,22 +278,31 @@ function renderManualAdd(root, session) {
 }
 
 async function loadOrdersForActiveWarehouse(root, session) {
-  const { data, error } = await supabase
-    .from("orders")
-    .select("id, order_id, warehouse_id, done, created_at, created_by, dispatch_date, exception_type, exception_note, rescheduled_to_id")
-    .eq("warehouse_id", activeWarehouseId)
-    .order("created_at", { ascending: false });
+  const warehouseId = activeWarehouseId;
+  const [ordersRes, picksRes] = await Promise.all([
+    supabase
+      .from("orders")
+      .select("id, order_id, warehouse_id, done, created_at, created_by, dispatch_date, exception_type, exception_note, rescheduled_to_id, details")
+      .eq("warehouse_id", warehouseId)
+      .order("created_at", { ascending: false }),
+    supabase.from("pick_marks").select("dispatch_date, product_name, picked_qty").eq("warehouse_id", warehouseId),
+  ]);
 
-  if (error) {
-    root.querySelector("#date-groups").innerHTML = `<p class="empty-note">Couldn't load orders: ${error.message}</p>`;
+  // The user may have switched warehouse while this was loading.
+  if (warehouseId !== activeWarehouseId || !root.querySelector("#date-groups")) return;
+
+  if (ordersRes.error) {
+    root.querySelector("#date-groups").innerHTML = `<p class="empty-note">Couldn't load orders: ${escapeHtml(ordersRes.error.message)}</p>`;
     return;
   }
-  orders = data || [];
+  orders = ordersRes.data || [];
+  pickMarks = new Map((picksRes.data || []).map((p) => [pickKey(p.dispatch_date, p.product_name), p.picked_qty]));
   renderDateGroups(root, session);
 }
 
 function renderDateGroups(root, session) {
   const container = root.querySelector("#date-groups");
+  if (!container) return;
   if (!orders.length) {
     container.innerHTML = `<p class="empty-note">No orders yet for this warehouse.</p>`;
     return;
@@ -277,50 +318,30 @@ function renderDateGroups(root, session) {
   const sortedKeys = [...groups.keys()].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
   const todayKey = todayDateKey();
   const canEdit = profile.role === "super_admin" || activeWarehouseId === profile.warehouse_id;
+  renderedProducts = [];
 
   container.innerHTML = sortedKeys
     .map((dateKey) => {
       const rows = groups.get(dateKey);
-      const doneCount = rows.filter((r) => r.done).length;
-      const flaggedCount = rows.filter((r) => r.exception_type).length;
+      const body = listMode === "products" ? renderProductsBody(dateKey, rows, canEdit) : renderOrdersBody(rows, canEdit);
       return `
         <div class="date-group ${dateKey === todayKey ? "today" : ""}" data-date="${dateKey}">
           <div class="date-group-head">
             <div class="title">
               <h3>${formatDateLabel(dateKey)}</h3>
-              <span class="count">${rows.length} order${rows.length === 1 ? "" : "s"} · ${doneCount} done${flaggedCount ? ` · ${flaggedCount} flagged` : ""}</span>
+              <span class="count">${body.countLabel}</span>
             </div>
             <div class="actions">
-              ${canEdit ? `<button class="mark-all" data-date="${dateKey}">Mark all complete</button>` : ""}
+              ${canEdit && listMode === "orders" ? `<button class="mark-all" data-date="${dateKey}">Mark all complete</button>` : ""}
               <button class="export" data-date="${dateKey}">Export</button>
             </div>
           </div>
-          <div class="order-list">
-            ${rows
-              .map((o) => {
-                const flagLabel = getExceptionLabel(o);
-                const movedFromLabel = getMovedFromLabel(o);
-                return `
-              <div class="order-row ${o.done ? "done" : ""} ${o.exception_type ? "exception" : ""}">
-                <label class="order-check" aria-label="Mark order ${escapeHtml(o.order_id)} as ${o.done ? "not done" : "done"}">
-                  <input type="checkbox" data-id="${o.id}" ${o.done ? "checked" : ""} ${canEdit && !o.exception_type ? "" : "disabled"} />
-                </label>
-                <span class="order-id">${escapeHtml(o.order_id)}</span>
-                ${flagLabel ? `<span class="exception-badge">${escapeHtml(flagLabel)}</span>` : ""}
-                ${movedFromLabel ? `<span class="moved-from">${escapeHtml(movedFromLabel)}</span>` : ""}
-                <span class="time">${formatTime(o.created_at)}</span>
-                ${canEdit && !o.exception_type ? `<button class="ghost icon-btn flag-incomplete" data-id="${o.id}" title="Mark incomplete" aria-label="Mark order ${escapeHtml(o.order_id)} as incomplete">${iconFlag}</button>` : ""}
-                ${canEdit && o.exception_type ? `<button class="ghost icon-btn clear-exception" data-id="${o.id}" title="Clear flag" aria-label="Clear exception flag for order ${escapeHtml(o.order_id)}">${iconRotate}</button>` : ""}
-                ${profile.role === "super_admin" ? `<button class="ghost icon-btn delete-order" data-id="${o.id}" title="Delete order" aria-label="Delete order ${escapeHtml(o.order_id)}">${iconX}</button>` : ""}
-              </div>`;
-              })
-              .join("")}
-          </div>
+          <div class="order-list">${body.html}</div>
         </div>`;
     })
     .join("");
 
-  container.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+  container.querySelectorAll(".order-done-check").forEach((cb) => {
     cb.addEventListener("change", async () => {
       const { error } = await supabase
         .from("orders")
@@ -328,6 +349,37 @@ function renderDateGroups(root, session) {
         .eq("id", cb.dataset.id);
       if (error) {
         await showAlert(`Couldn't update order: ${error.message}`);
+        cb.checked = !cb.checked;
+        return;
+      }
+      await loadOrdersForActiveWarehouse(root, session);
+    });
+  });
+
+  container.querySelectorAll(".pick-check").forEach((cb) => {
+    cb.addEventListener("change", async () => {
+      const p = renderedProducts[Number(cb.dataset.idx)];
+      if (!p) return;
+      const { error } = cb.checked
+        ? await supabase.from("pick_marks").upsert(
+            {
+              warehouse_id: activeWarehouseId,
+              dispatch_date: p.dateKey,
+              product_name: p.name,
+              picked_qty: p.qty,
+              picked_by: session.user.id,
+              picked_at: new Date().toISOString(),
+            },
+            { onConflict: "warehouse_id,dispatch_date,product_name" }
+          )
+        : await supabase
+            .from("pick_marks")
+            .delete()
+            .eq("warehouse_id", activeWarehouseId)
+            .eq("dispatch_date", p.dateKey)
+            .eq("product_name", p.name);
+      if (error) {
+        await showAlert(`Couldn't update product: ${error.message}`);
         cb.checked = !cb.checked;
         return;
       }
@@ -378,10 +430,116 @@ function renderDateGroups(root, session) {
   container.querySelectorAll(".export").forEach((btn) => {
     btn.addEventListener("click", () => {
       const dateKey = btn.dataset.date;
-      const rows = groups.get(dateKey);
-      exportOrderIds(rows, dateKey);
+      exportOrders(groups.get(dateKey), dateKey);
     });
   });
+}
+
+function renderOrdersBody(rows, canEdit) {
+  const doneCount = rows.filter((r) => r.done).length;
+  const flaggedCount = rows.filter((r) => r.exception_type).length;
+  const html = rows
+    .map((o) => {
+      const flagLabel = getExceptionLabel(o);
+      const movedFromLabel = getMovedFromLabel(o);
+      const items = itemsSummary(o);
+      return `
+    <div class="order-row ${o.done ? "done" : ""} ${o.exception_type ? "exception" : ""}">
+      <label class="order-check" aria-label="Mark order ${escapeHtml(o.order_id)} as ${o.done ? "not done" : "done"}">
+        <input type="checkbox" class="order-done-check" data-id="${o.id}" ${o.done ? "checked" : ""} ${canEdit && !o.exception_type ? "" : "disabled"} />
+      </label>
+      <span class="order-id">${escapeHtml(o.order_id)}</span>
+      ${items ? `<span class="order-items" title="${escapeAttr(items)}">${escapeHtml(items)}</span>` : ""}
+      ${flagLabel ? `<span class="exception-badge">${escapeHtml(flagLabel)}</span>` : ""}
+      ${movedFromLabel ? `<span class="moved-from">${escapeHtml(movedFromLabel)}</span>` : ""}
+      <span class="time">${formatTime(o.created_at)}</span>
+      ${canEdit && !o.exception_type ? `<button class="ghost icon-btn flag-incomplete" data-id="${o.id}" title="Mark incomplete" aria-label="Mark order ${escapeHtml(o.order_id)} as incomplete">${iconFlag}</button>` : ""}
+      ${canEdit && o.exception_type ? `<button class="ghost icon-btn clear-exception" data-id="${o.id}" title="Clear flag" aria-label="Clear exception flag for order ${escapeHtml(o.order_id)}">${iconRotate}</button>` : ""}
+      ${profile.role === "super_admin" ? `<button class="ghost icon-btn delete-order" data-id="${o.id}" title="Delete order" aria-label="Delete order ${escapeHtml(o.order_id)}">${iconX}</button>` : ""}
+    </div>`;
+    })
+    .join("");
+  const countLabel = `${plural(rows.length, "order")} · ${doneCount} done${flaggedCount ? ` · ${flaggedCount} flagged` : ""}`;
+  return { html, countLabel };
+}
+
+// Pick list for one date card: every product across that day's orders,
+// with total quantity. Cancelled / moved orders are left out, since their
+// units aren't going out from this card.
+function renderProductsBody(dateKey, rows, canEdit) {
+  const { products, missing } = aggregateProducts(rows);
+  let units = 0;
+  let collected = 0;
+
+  const html = products
+    .map((p) => {
+      const idx = renderedProducts.push({ dateKey, name: p.name, qty: p.qty }) - 1;
+      const picked = pickMarks.get(pickKey(dateKey, p.name)) || 0;
+      const done = picked >= p.qty;
+      units += p.qty;
+      if (done) collected += 1;
+      const orderList = p.orders.map((o) => (o.qty > 1 ? `${o.orderId} ×${o.qty}` : o.orderId)).join(", ");
+      return `
+    <div class="order-row product-row ${done ? "done" : ""}">
+      <label class="order-check" aria-label="Mark ${escapeAttr(p.name)} as ${done ? "not collected" : "collected"}">
+        <input type="checkbox" class="pick-check" data-idx="${idx}" ${done ? "checked" : ""} ${canEdit ? "" : "disabled"} />
+      </label>
+      <div class="product-main">
+        <span class="order-id">${escapeHtml(p.name)}</span>
+        <span class="product-meta">
+          ${picked > 0 && !done ? `<span class="pick-partial">${picked} of ${p.qty} collected</span>` : ""}
+          <span class="product-orders">${escapeHtml(orderList)}</span>
+        </span>
+      </div>
+      <span class="product-qty">× ${p.qty}</span>
+    </div>`;
+    })
+    .join("");
+
+  const missingNote = missing.length
+    ? `<p class="pick-missing">No product details for ${escapeHtml(missing.join(", "))} (typed in manually, or captured before this update).</p>`
+    : "";
+  const emptyNote = !products.length && !missing.length ? `<p class="pick-missing">No orders to pick for this day.</p>` : "";
+  const countLabel = `${plural(products.length, "product")} · ${plural(units, "unit")} · ${collected} collected`;
+  return { html: html + missingNote + emptyNote, countLabel };
+}
+
+function aggregateProducts(rows) {
+  const byName = new Map();
+  const missing = [];
+  for (const o of rows) {
+    if (o.exception_type) continue;
+    const items = o.details?.items;
+    if (!items?.length) {
+      missing.push(o.order_id);
+      continue;
+    }
+    for (const it of items) {
+      const qty = Number(it.qty) || 1;
+      if (!byName.has(it.name)) byName.set(it.name, { name: it.name, qty: 0, orders: [] });
+      const p = byName.get(it.name);
+      p.qty += qty;
+      const existing = p.orders.find((x) => x.orderId === o.order_id);
+      if (existing) existing.qty += qty;
+      else p.orders.push({ orderId: o.order_id, qty });
+    }
+  }
+  const products = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return { products, missing };
+}
+
+function itemsSummary(o) {
+  const items = o.details?.items;
+  if (!items?.length) return "";
+  return items.map((it) => `${it.name} ×${Number(it.qty) || 1}`).join(", ");
+}
+
+function pickKey(dateKey, name) {
+  return `${dateKey}|${name}`;
+}
+
+function plural(n, word) {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 function getExceptionLabel(o) {
@@ -410,6 +568,11 @@ function openExceptionDialog(order, root, session) {
         Missed — dispatch next day
       </label>
       <label class="exception-option">
+        <input type="radio" name="exception-reason" value="another-day" />
+        Dispatch on another day
+      </label>
+      <input type="date" id="exception-date" style="display:none" />
+      <label class="exception-option">
         <input type="radio" name="exception-reason" value="cancelled" />
         Cancelled
       </label>
@@ -427,10 +590,14 @@ function openExceptionDialog(order, root, session) {
   document.body.appendChild(overlay);
 
   const noteBox = overlay.querySelector("#exception-note");
+  const dateBox = overlay.querySelector("#exception-date");
+  dateBox.min = todayDateKey();
   overlay.querySelectorAll('input[name="exception-reason"]').forEach((radio) => {
     radio.addEventListener("change", () => {
       const selected = overlay.querySelector('input[name="exception-reason"]:checked').value;
       noteBox.style.display = selected === "other" ? "block" : "none";
+      dateBox.style.display = selected === "another-day" ? "block" : "none";
+      if (selected === "another-day") dateBox.focus();
     });
   });
 
@@ -446,14 +613,28 @@ function openExceptionDialog(order, root, session) {
       await showAlert('Add a quick note for "Other".');
       return;
     }
+    if (selected === "another-day") {
+      const target = dateBox.value;
+      if (!target) {
+        await showAlert("Pick the day it should be dispatched.");
+        return;
+      }
+      if (target === order.dispatch_date) {
+        await showAlert("That's the day it's already on. Pick a different day.");
+        return;
+      }
+      overlay.remove();
+      await applyException(order, "rescheduled", "", root, session, target);
+      return;
+    }
     overlay.remove();
     await applyException(order, selected, note, root, session);
   });
 }
 
-async function applyException(order, type, note, root, session) {
+async function applyException(order, type, note, root, session, targetDate = null) {
   if (type === "rescheduled") {
-    const nextDate = addDays(order.dispatch_date, 1);
+    const nextDate = targetDate || addDays(order.dispatch_date, 1);
     const { data: newOrder, error: insertError } = await supabase
       .from("orders")
       .insert({
@@ -461,6 +642,7 @@ async function applyException(order, type, note, root, session) {
         warehouse_id: order.warehouse_id,
         dispatch_date: nextDate,
         created_by: session.user.id,
+        details: order.details ?? null,
       })
       .select()
       .single();
@@ -502,8 +684,8 @@ async function clearException(order, root, session) {
   await loadOrdersForActiveWarehouse(root, session);
 }
 
-function exportOrderIds(rows, dateKey) {
-  const text = rows.map((r) => r.order_id).join("\n");
+function exportOrders(rows, dateKey) {
+  const text = rows.map(exportLine).join("\n");
   const warehouseName = warehouses.find((w) => w.id === activeWarehouseId)?.name || "warehouse";
   const filename = `${warehouseName}_${dateKey}.txt`;
 
@@ -520,11 +702,22 @@ function exportOrderIds(rows, dateKey) {
   }
 }
 
+// "WOO-42632 - VXE R1S Tri-Mode Gaming Mouse - White x 1, FANTECH MP256 Gaming Mousepad x 2".
+// Orders without product details export as just the ID.
+function exportLine(o) {
+  const items = o.details?.items;
+  if (!items?.length) return o.order_id;
+  return `${o.order_id} - ${items.map((it) => `${it.name} x ${Number(it.qty) || 1}`).join(", ")}`;
+}
+
 function subscribeRealtime(root, session) {
   if (realtimeChannel) supabase.removeChannel(realtimeChannel);
   realtimeChannel = supabase
     .channel("orders-changes")
     .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => {
+      if (activeView === "warehouse") loadOrdersForActiveWarehouse(root, session);
+    })
+    .on("postgres_changes", { event: "*", schema: "public", table: "pick_marks" }, () => {
       if (activeView === "warehouse") loadOrdersForActiveWarehouse(root, session);
     })
     .subscribe();
@@ -554,6 +747,28 @@ function formatDateLabel(dateKey) {
 
 function formatTime(iso) {
   return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
+function readListMode() {
+  try {
+    return localStorage.getItem(LIST_MODE_KEY) === "products" ? "products" : "orders";
+  } catch {
+    return "orders";
+  }
+}
+
+function saveListMode(mode) {
+  try {
+    localStorage.setItem(LIST_MODE_KEY, mode);
+  } catch {
+    // Private window or blocked storage: the toggle still works, it just isn't remembered.
+  }
+}
+
+// escapeHtml leaves quotes alone, which is fine for text but not inside
+// an attribute value.
+function escapeAttr(str) {
+  return escapeHtml(str).replace(/"/g, "&quot;");
 }
 
 function escapeHtml(str) {

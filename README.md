@@ -82,6 +82,10 @@ Manifest v3 browser extension for capture.
      call instead of inserting directly, so a previously-captured
      `order_id` triggers a duplicate-warning prompt instead of silently
      recording twice.
+   - `supabase/migrations/0005_order_details_pick_list.sql` — saves each
+     order's products, amounts and source alongside the ID (read from the
+     Zagle order card at capture time), and adds the `pick_marks` table
+     behind the dashboard's Products (pick list) view.
 3. **Authentication → Users** — create an account for yourself. This
    becomes your first `super_admin`; every account after this one can be
    created from the in-app Admin panel instead.
@@ -119,7 +123,11 @@ build.
 2. `chrome://extensions` → enable **Developer mode** → **Load unpacked**
    → select the `copy-extension/` folder.
 3. Click the extension icon and sign in.
-4. Select an order ID on any page → right-click → **Send to warehouse**.
+4. On Zagle's orders list, select an order ID (or anywhere inside the
+   order card) → right-click → **Send to warehouse**. The extension reads
+   the whole card, so the order's products, amounts and source are saved
+   with it. Badge: green ✓ = full details saved, amber **ID** = only the ID
+   (not a Zagle card, or the card couldn't be read).
 
 The context menu is built from the live `warehouses` table (refreshes
 every 30 minutes, or immediately after sign-in), so new warehouses appear

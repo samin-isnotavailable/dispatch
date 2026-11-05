@@ -22,6 +22,7 @@ async function forceCapture(pending) {
       p_warehouse_id: pending.warehouseId,
       p_dispatch_date: pending.dispatchDate,
       p_force: true,
+      p_details: pending.details ?? null,
     }),
   });
   if (!res.ok) throw new Error(await res.text());

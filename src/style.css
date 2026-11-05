@@ -359,6 +359,95 @@ main.container {
   background: rgba(255, 107, 107, 0.12);
 }
 
+/* ---------------- Orders / Products toggle ---------------- */
+
+.view-toggle {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  margin-bottom: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.view-toggle button {
+  border: none;
+  background: transparent;
+  color: var(--ink-secondary);
+  padding: 6px 16px;
+  font-size: 13px;
+  border-radius: 7px;
+}
+.view-toggle button:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.view-toggle button.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* Products in an order row ("VXE R1 - Black ×1, Mousepad ×2"). One line,
+   truncated, so rows keep their height; full text is in the tooltip. */
+.order-row .order-items {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ink-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------------- Products (pick list) view ---------------- */
+
+.product-row .product-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.product-row .product-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.product-row .product-orders {
+  font-size: 11px;
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+.product-row .product-qty {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.product-row.done .product-qty {
+  color: var(--ink-muted);
+}
+.pick-partial {
+  font-size: 11px;
+  font-weight: 500;
+  color: #f5b544;
+  background: rgba(245, 181, 68, 0.14);
+  padding: 2px 8px;
+  border-radius: 100px;
+  white-space: nowrap;
+}
+.pick-missing {
+  margin: 4px 2px 0;
+  font-size: 12px;
+  color: var(--ink-muted);
+  line-height: 1.5;
+}
+#exception-date {
+  width: 100%;
+  margin-top: 8px;
+}
+
 /* ---------------- Exception flag (incomplete order) ---------------- */
 
 .exception-badge {
@@ -727,6 +816,22 @@ main.container {
   .order-row .exception-badge,
   .order-row .moved-from {
     flex-basis: 100%;
+  }
+  /* Pick-list rows keep checkbox | name | quantity on one line. */
+  .order-row.product-row {
+    flex-wrap: nowrap;
+    align-items: flex-start;
+  }
+  .order-row .order-items {
+    flex-basis: 100%;
+    order: 10;
+    white-space: normal;
+  }
+  .view-toggle {
+    display: flex;
+  }
+  .view-toggle button {
+    flex: 1 1 0;
   }
   .batch-row .batch-status {
     flex: 1 1 auto;

@@ -6,7 +6,7 @@ let profile = null;
 let warehouses = [];
 let orders = [];
 let activeWarehouseId = null;
-let activeView = "warehouse"; // "warehouse" | "notes"
+let activeView = "warehouse"; // "warehouse" | "notes" | "prebook" | "stats"
 let realtimeChannel = null;
 let notesSaveTimer = null;
 
@@ -94,6 +94,9 @@ async function paint(root, session) {
   } else if (activeView === "prebook") {
     const { renderPrebook } = await import("./prebook.js");
     await renderPrebook(root.querySelector("#view-body"), session, profile);
+  } else if (activeView === "stats" && profile.role === "super_admin") {
+    const { renderStats } = await import("./stats.js");
+    await renderStats(root.querySelector("#view-body"), { warehouses });
   } else {
     await paintWarehouseView(root, session);
   }
@@ -189,6 +192,9 @@ function renderTabs(root, session) {
 
   tabsEl.innerHTML += `<div class="tab ${activeView === "notes" ? "active" : ""}" id="notes-tab" role="tab" tabindex="0" aria-selected="${activeView === "notes"}">Notes</div>`;
   tabsEl.innerHTML += `<div class="tab ${activeView === "prebook" ? "active" : ""}" id="prebook-tab" role="tab" tabindex="0" aria-selected="${activeView === "prebook"}">Prebook</div>`;
+  if (profile.role === "super_admin") {
+    tabsEl.innerHTML += `<div class="tab ${activeView === "stats" ? "active" : ""}" id="stats-tab" role="tab" tabindex="0" aria-selected="${activeView === "stats"}">Statistics</div>`;
+  }
 
   tabsEl.querySelectorAll(".tab[data-id]").forEach((el) => {
     el.addEventListener("click", async () => {
@@ -205,6 +211,11 @@ function renderTabs(root, session) {
 
   tabsEl.querySelector("#prebook-tab").addEventListener("click", async () => {
     activeView = "prebook";
+    await paint(root, session);
+  });
+
+  tabsEl.querySelector("#stats-tab")?.addEventListener("click", async () => {
+    activeView = "stats";
     await paint(root, session);
   });
 

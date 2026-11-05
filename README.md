@@ -40,6 +40,12 @@ Manifest v3 browser extension for capture.
   available at a glance. Products can be added manually or bulk-imported
   via CSV (with optional brand-column mapping), and the batch list is
   searchable by product/brand/SKU and grouped by brand.
+- **Statistics** (super_admin only) — revenue, units, average order
+  value, website vs manual sales (per salesperson), coupons, order-time
+  heatmap, top sellers and slow movers, variant and brand split, products
+  bought together, warehouse load, districts, and repeat customers, for
+  any date range and warehouse. Built from the order details the extension
+  captures from Zagle.
 - **Admin panel** (`/admin`, super_admin only) — create staff accounts,
   assign roles/warehouses, and add warehouses, all from the UI.
 
@@ -86,6 +92,8 @@ Manifest v3 browser extension for capture.
      order's products, amounts and source alongside the ID (read from the
      Zagle order card at capture time), and adds the `pick_marks` table
      behind the dashboard's Products (pick list) view.
+   - `supabase/migrations/0006_statistics.sql` — adds the `stats_dataset`
+     function behind the Statistics tab.
 3. **Authentication → Users** — create an account for yourself. This
    becomes your first `super_admin`; every account after this one can be
    created from the in-app Admin panel instead.

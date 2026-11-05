@@ -62,6 +62,44 @@ export function showConfirm(message, { confirmLabel = "Confirm", danger = false 
   });
 }
 
+// Shown when capture_order's duplicate check finds the order_id already
+// recorded. Lists where it was already captured and asks for explicit
+// confirmation before recording it again — "Yes" calls capture_order a
+// second time with p_force=true (see 0004_order_capture_dedupe.sql).
+export function showDuplicateWarning({ orderId, matches }) {
+  return new Promise((resolve) => {
+    const overlay = buildDialog(`
+      <h3>Possible duplicate</h3>
+      <p class="dialog-message"></p>
+      <div class="duplicate-matches"></div>
+      <p class="dialog-message">Record it anyway?</p>
+      <div class="exception-actions">
+        <button class="ghost" id="dialog-cancel">No</button>
+        <button class="primary" id="dialog-confirm">Yes</button>
+      </div>
+    `);
+    overlay.querySelector(".dialog-message").textContent = `"${orderId}" is already on file:`;
+
+    const list = overlay.querySelector(".duplicate-matches");
+    for (const m of matches) {
+      const row = document.createElement("div");
+      row.className = "duplicate-match-row";
+      const when = m.created_at ? new Date(m.created_at).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }) : "unknown time";
+      row.textContent = `${m.warehouse_name} · dispatch ${m.dispatch_date || "—"} · added ${when}${m.done ? " · done" : ""}`;
+      list.appendChild(row);
+    }
+
+    const finish = (result) => {
+      overlay.remove();
+      resolve(result);
+    };
+    overlay.querySelector("#dialog-cancel").addEventListener("click", () => finish(false));
+    overlay.querySelector("#dialog-confirm").addEventListener("click", () => finish(true));
+    closeOnEscapeOrBackdrop(overlay, () => finish(false));
+    overlay.querySelector("#dialog-cancel").focus();
+  });
+}
+
 // Combined stock-quantity + expected-date editor for a pre-book batch —
 // one dialog instead of two separate prompts, since the compact batch row
 // only has room for a single "edit" icon button.

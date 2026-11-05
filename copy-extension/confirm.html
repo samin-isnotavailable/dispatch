@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap");
+      body {
+        width: 340px;
+        font-family: "Inter Tight", -apple-system, sans-serif;
+        font-size: 13px;
+        padding: 16px;
+        color: #eef2f8;
+        background: #152238;
+      }
+      h1 {
+        font-size: 15px;
+        font-weight: 600;
+        margin: 0 0 4px;
+      }
+      p {
+        margin: 0 0 10px;
+        line-height: 1.5;
+      }
+      .order-id {
+        font-weight: 600;
+        color: #ffd166;
+      }
+      .matches {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin: 0 0 14px;
+        max-height: 180px;
+        overflow-y: auto;
+      }
+      .match-row {
+        font-size: 12px;
+        line-height: 1.4;
+        color: #a6b3c9;
+        background: #0d1626;
+        border: 1px solid #243352;
+        border-radius: 8px;
+        padding: 8px 10px;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+      }
+      button {
+        flex: 1;
+        padding: 9px;
+        border: none;
+        border-radius: 6px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      #no {
+        background: #243352;
+        color: #eef2f8;
+      }
+      #no:hover {
+        background: #2d3f65;
+      }
+      #yes {
+        background: #6c63ff;
+        color: #fff;
+      }
+      #yes:hover {
+        background: #7d75ff;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .status {
+        margin-top: 10px;
+        font-size: 12px;
+      }
+      .status.error {
+        color: #ff6b6b;
+      }
+      .status.success {
+        color: #4fd88a;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="confirm.js"></script>
+  </body>
+</html>

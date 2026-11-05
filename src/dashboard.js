@@ -1,6 +1,6 @@
 import { supabase } from "./supabaseClient.js";
 import { iconX, iconFlag, iconRotate } from "./icons.js";
-import { showAlert, showConfirm } from "./dialogs.js";
+import { showAlert, showConfirm, showDuplicateWarning } from "./dialogs.js";
 
 let profile = null;
 let warehouses = [];
@@ -205,16 +205,32 @@ function renderManualAdd(root, session) {
     const warehouseId = select.value;
     if (!orderId || !warehouseId) return;
 
-    const { error } = await supabase.from("orders").insert({
-      order_id: orderId,
-      warehouse_id: warehouseId,
-      dispatch_date: todayDateKey(),
-      created_by: session.user.id,
+    let { data, error } = await supabase.rpc("capture_order", {
+      p_order_id: orderId,
+      p_warehouse_id: warehouseId,
+      p_dispatch_date: todayDateKey(),
     });
     if (error) {
       await showAlert(`Couldn't add order: ${error.message}`);
       return;
     }
+
+    let result = data?.[0];
+    if (result && !result.inserted) {
+      const proceed = await showDuplicateWarning({ orderId, matches: result.existing_matches || [] });
+      if (!proceed) return;
+      ({ data, error } = await supabase.rpc("capture_order", {
+        p_order_id: orderId,
+        p_warehouse_id: warehouseId,
+        p_dispatch_date: todayDateKey(),
+        p_force: true,
+      }));
+      if (error) {
+        await showAlert(`Couldn't add order: ${error.message}`);
+        return;
+      }
+    }
+
     input.value = "";
     input.focus();
     if (warehouseId === activeWarehouseId) await loadOrdersForActiveWarehouse(root, session);

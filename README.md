@@ -77,6 +77,11 @@ Manifest v3 browser extension for capture.
      `brand` column to `products`, used to group the pre-book list by
      brand (falls back to the first word of the product name until
      backfilled).
+   - `supabase/migrations/0004_order_capture_dedupe.sql` — adds the
+     `capture_order` RPC that both capture paths (extension + manual add)
+     call instead of inserting directly, so a previously-captured
+     `order_id` triggers a duplicate-warning prompt instead of silently
+     recording twice.
 3. **Authentication → Users** — create an account for yourself. This
    becomes your first `super_admin`; every account after this one can be
    created from the in-app Admin panel instead.

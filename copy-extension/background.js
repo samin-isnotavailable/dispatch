@@ -2,6 +2,9 @@ import { authedFetch, getSession } from "./authClient.js";
 
 const PARENT_ID = "dispatch-capture-parent";
 const REFRESH_ALARM = "refresh-warehouse-menu";
+const PENDING_CAPTURE_KEY = "pendingCapture";
+
+let warehousesCache = [];
 
 function todayDateKey() {
   const d = new Date();
@@ -17,15 +20,14 @@ async function rebuildMenu() {
   const session = await getSession();
   if (!session) return; // not signed in — popup will prompt
 
-  let warehouses = [];
   try {
     const res = await authedFetch("/rest/v1/warehouses?select=id,name&order=name.asc");
-    if (res.ok) warehouses = await res.json();
+    warehousesCache = res.ok ? await res.json() : [];
   } catch (e) {
     console.error("DispatchEZ Capture: couldn't load warehouses", e);
     return;
   }
-  if (!warehouses.length) return;
+  if (!warehousesCache.length) return;
 
   chrome.contextMenus.create({
     id: PARENT_ID,
@@ -33,7 +35,7 @@ async function rebuildMenu() {
     contexts: ["selection"],
   });
 
-  for (const w of warehouses) {
+  for (const w of warehousesCache) {
     chrome.contextMenus.create({
       id: `wh-${w.id}`,
       parentId: PARENT_ID,
@@ -58,6 +60,32 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "refresh-menu") rebuildMenu();
 });
 
+function showBadge(text, color) {
+  if (color) chrome.action.setBadgeBackgroundColor({ color });
+  chrome.action.setBadgeText({ text });
+  setTimeout(() => chrome.action.setBadgeText({ text: "" }), text === "!" ? 2500 : 1500);
+}
+
+// Calls the capture_order RPC (see supabase/migrations/0004_order_capture_dedupe.sql).
+// With force=false it only inserts when no order with this order_id exists
+// yet; otherwise it returns the existing matches without writing anything,
+// so the duplicate check always runs against the live table, not a local
+// cache the extension might be out of sync with.
+async function captureOrder({ orderId, warehouseId, dispatchDate, force }) {
+  const res = await authedFetch("/rest/v1/rpc/capture_order", {
+    method: "POST",
+    body: JSON.stringify({
+      p_order_id: orderId,
+      p_warehouse_id: warehouseId,
+      p_dispatch_date: dispatchDate,
+      p_force: force,
+    }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const [result] = await res.json();
+  return result;
+}
+
 chrome.contextMenus.onClicked.addListener(async (info) => {
   if (!info.menuItemId.startsWith("wh-")) return;
   const warehouseId = info.menuItemId.slice(3);
@@ -68,26 +96,32 @@ chrome.contextMenus.onClicked.addListener(async (info) => {
   if (!session) return;
 
   try {
-    const res = await authedFetch("/rest/v1/orders", {
-      method: "POST",
-      headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({
-        order_id: orderId,
-        warehouse_id: warehouseId,
-        dispatch_date: todayDateKey(),
-        created_by: session.user_id,
-      }),
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(body);
+    const result = await captureOrder({ orderId, warehouseId, dispatchDate: todayDateKey(), force: false });
+    if (result.inserted) {
+      showBadge("✓", "#2e7d5b");
+      return;
     }
-    chrome.action.setBadgeText({ text: "✓" });
-    setTimeout(() => chrome.action.setBadgeText({ text: "" }), 1500);
+
+    // Duplicate found — hand off to a confirmation window instead of
+    // silently recording or silently dropping it.
+    const warehouseName = warehousesCache.find((w) => w.id === warehouseId)?.name || "this warehouse";
+    await chrome.storage.local.set({
+      [PENDING_CAPTURE_KEY]: {
+        orderId,
+        warehouseId,
+        warehouseName,
+        dispatchDate: todayDateKey(),
+        matches: result.existing_matches || [],
+      },
+    });
+    await chrome.windows.create({
+      url: chrome.runtime.getURL("confirm.html"),
+      type: "popup",
+      width: 380,
+      height: 460,
+    });
   } catch (e) {
     console.error("DispatchEZ Capture: failed to save order", e);
-    chrome.action.setBadgeText({ text: "!" });
-    chrome.action.setBadgeBackgroundColor({ color: "#b8342a" });
-    setTimeout(() => chrome.action.setBadgeText({ text: "" }), 2500);
+    showBadge("!", "#b8342a");
   }
 });

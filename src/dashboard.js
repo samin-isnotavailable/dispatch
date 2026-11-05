@@ -694,7 +694,7 @@ function exportOrders(rows, dateKey) {
 // (cancelled / moved orders left out).
 function exportProducts(rows, dateKey) {
   const { products } = aggregateProducts(rows);
-  downloadAndCopy(products.map((p) => `${p.name} x ${p.qty}`).join("\n"), `${dateKey}_products.txt`);
+  downloadAndCopy(products.map((p) => `${p.name} x ${p.qty}`).join("\n"), `${dateKey}_Products.txt`);
 }
 
 function downloadAndCopy(text, suffix) {

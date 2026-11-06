@@ -107,6 +107,18 @@ an order when it's packed or dispatched.
 
 The file downloads and is also copied, ready to paste.
 
+### No laptop with the extension? Add the order by hand
+
+- **Type the order ID** in the box at the top of your warehouse tab. Short forms
+  work: `42420` is saved as `WOO-42420`, and `261106-0098` as `ORD-261106-0098`.
+- **Or paste the whole order.** On Zagle (computer or phone), select the order
+  card, copy it, and paste it into the same box, or click **Paste order**.
+  You'll see a preview of the products, customer and amounts before saving.
+- **Fill in details later.** Orders saved with only an ID show **Add details**
+  (and "missing details" on their day's card). Click it and paste the order from
+  Zagle. Or simply send that order from Zagle with the extension later: it fills
+  the details into the existing order instead of warning about a duplicate.
+
 ### 4. When an order can't go out today
 
 Click the **flag** on the order, then choose:
@@ -295,6 +307,9 @@ Built with the same stack as its sibling tool,
      function behind the Statistics tab.
    - `supabase/migrations/0007_statistics_exports.sql` — adds customer
      name, area and address to the statistics data, for exports.
+   - `supabase/migrations/0008_fill_missing_details.sql` — completes short
+     order IDs (`42420` → `WOO-42420`), and lets a later capture or a pasted
+     order fill in an order that was saved with only its ID.
 3. **Authentication → Users** — create an account for yourself. This
    becomes your first `super_admin`; every account after this one can be
    created from the in-app Admin panel instead.
@@ -352,6 +367,7 @@ dispatchez/
 │   ├── dashboard.js          # warehouse tabs, Orders / Products views
 │   ├── stats.js              # Statistics tab (filters, charts, exports)
 │   ├── statsCompute.js       # Statistics calculations (no DOM)
+│   ├── orderTextParser.js    # reads an order pasted from Zagle as text
 │   ├── prebook.js            # pre-book batches + claimed-order tracking
 │   ├── admin.js              # /admin panel (users, roles, warehouses)
 │   ├── dialogs.js            # themed alert/confirm/prompt replacements
@@ -370,14 +386,14 @@ dispatchez/
 │   ├── popup.html / popup.js
 │   └── config.js
 ├── docs/images/              # screenshots used in this README
-├── supabase/migrations/      # 0001 … 0007, run in order
+├── supabase/migrations/      # 0001 … 0008, run in order
 └── index.html
 ```
 
 ## Roadmap
 
 - Chrome Web Store (unlisted) listing for one-click install and auto-updates
-- Look up an order's details from its ID alone (needs a Zagle API or webhooks)
+- Look up an order's details from its ID alone, with no copying (needs a Zagle API or webhooks)
 - Per-warehouse export history / archive view
 
 ## License

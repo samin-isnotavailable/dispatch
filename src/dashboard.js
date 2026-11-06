@@ -1,6 +1,7 @@
 import { supabase } from "./supabaseClient.js";
 import { iconX, iconFlag, iconRotate } from "./icons.js";
-import { showAlert, showConfirm, showDuplicateWarning } from "./dialogs.js";
+import { showAlert, showConfirm, showDuplicateWarning, showOrderPaste } from "./dialogs.js";
+import { parseOrderText, normalizeOrderId } from "./orderTextParser.js";
 
 let profile = null;
 let warehouses = [];
@@ -106,9 +107,10 @@ async function paintWarehouseView(root, session) {
   const body = root.querySelector("#view-body");
   body.innerHTML = `
     <div class="manual-add">
-      <input type="text" id="manual-order-id" placeholder="Paste order ID, e.g. WOO-3423" />
+      <input type="text" id="manual-order-id" placeholder="Order ID (WOO-42420 or just 42420), or paste a whole order" />
       <select id="manual-warehouse"></select>
       <button class="primary" id="manual-add-btn">Add order</button>
+      <button id="paste-order-btn" title="Paste a whole order copied from Zagle">Paste order</button>
     </div>
     <div class="view-toggle" role="group" aria-label="Show orders or products">
       <button type="button" data-mode="orders">Orders</button>
@@ -247,45 +249,98 @@ function renderManualAdd(root, session) {
     const orderId = input.value.trim();
     const warehouseId = select.value;
     if (!orderId || !warehouseId) return;
-
-    let { data, error } = await supabase.rpc("capture_order", {
-      p_order_id: orderId,
-      p_warehouse_id: warehouseId,
-      p_dispatch_date: todayDateKey(),
-    });
-    if (error) {
-      await showAlert(`Couldn't add order: ${error.message}`);
-      return;
+    if (await saveCapture(root, session, { orderId, warehouseId, details: null })) {
+      input.value = "";
+      input.focus();
     }
+  };
 
-    let result = data?.[0];
-    if (result && !result.inserted) {
-      const proceed = await showDuplicateWarning({ orderId, matches: result.existing_matches || [] });
-      if (!proceed) return;
-      ({ data, error } = await supabase.rpc("capture_order", {
-        p_order_id: orderId,
-        p_warehouse_id: warehouseId,
-        p_dispatch_date: todayDateKey(),
-        p_force: true,
-      }));
-      if (error) {
-        await showAlert(`Couldn't add order: ${error.message}`);
-        return;
-      }
-    }
-
-    input.value = "";
-    input.focus();
-    if (warehouseId === activeWarehouseId) await loadOrdersForActiveWarehouse(root, session);
+  // A whole order pasted into the box (more than one line) opens the
+  // preview instead of being squashed into the one-line ID field.
+  const openPaste = async (text = "") => {
+    const warehouseId = select.value;
+    if (!warehouseId) return;
+    const pasted = await showOrderPaste({ parse: parseOrderText, normalize: normalizeOrderId, initialText: text, saveLabel: "Add order" });
+    if (!pasted) return;
+    if (await saveCapture(root, session, { orderId: pasted.orderId, warehouseId, details: pasted.details })) input.value = "";
   };
 
   root.querySelector("#manual-add-btn").addEventListener("click", submitOrder);
+  root.querySelector("#paste-order-btn").addEventListener("click", () => openPaste());
+  input.addEventListener("paste", (e) => {
+    const text = e.clipboardData?.getData("text") || "";
+    if (!/\n/.test(text.trim())) return; // a plain ID: let it paste normally
+    e.preventDefault();
+    openPaste(text);
+  });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
       submitOrder();
     }
   });
+}
+
+// One path for every way an order is added from the dashboard: typed ID,
+// pasted order, or "Add details" on an existing order. capture_order
+// completes short IDs, fills in an ID-only record of the same order in this
+// warehouse, or reports a duplicate (then we ask). Returns true if saved.
+async function saveCapture(root, session, { orderId, warehouseId, details }) {
+  const call = (force) =>
+    supabase.rpc("capture_order", {
+      p_order_id: orderId,
+      p_warehouse_id: warehouseId,
+      p_dispatch_date: todayDateKey(),
+      p_force: force,
+      p_details: details ?? null,
+    });
+  let { data, error } = await call(false);
+  if (error) {
+    await showAlert(`Couldn't add order: ${error.message}`);
+    return false;
+  }
+  const result = data?.[0];
+  if (result && !result.inserted && !result.filled) {
+    const proceed = await showDuplicateWarning({ orderId: normalizeOrderId(orderId), matches: result.existing_matches || [] });
+    if (!proceed) return false;
+    ({ error } = await call(true));
+    if (error) {
+      await showAlert(`Couldn't add order: ${error.message}`);
+      return false;
+    }
+  }
+  if (warehouseId === activeWarehouseId) await loadOrdersForActiveWarehouse(root, session);
+  return true;
+}
+
+// "Add details" on an order saved with only its ID.
+async function addDetailsFor(orderId, root, session) {
+  const pasted = await showOrderPaste({
+    parse: parseOrderText,
+    normalize: normalizeOrderId,
+    title: `Add details for ${orderId}`,
+    expectOrderId: orderId,
+    saveLabel: "Save details",
+  });
+  if (!pasted) return;
+  // Update this order's ID-only record(s) directly. Never goes through
+  // capture_order, so it can't add a second order, whatever state the
+  // database functions are in.
+  const { data, error } = await supabase
+    .from("orders")
+    .update({ details: pasted.details })
+    .eq("warehouse_id", activeWarehouseId)
+    .eq("order_id", orderId)
+    .is("details", null)
+    .select("id");
+  if (error) {
+    await showAlert(`Couldn't save details: ${error.message}`);
+    return;
+  }
+  if (!data?.length) {
+    await showAlert(`${orderId} already has its details, so nothing was changed.`);
+  }
+  await loadOrdersForActiveWarehouse(root, session);
 }
 
 async function loadOrdersForActiveWarehouse(root, session) {
@@ -438,6 +493,10 @@ function renderDateGroups(root, session) {
     });
   });
 
+  container.querySelectorAll(".add-details, .add-details-link").forEach((btn) => {
+    btn.addEventListener("click", () => addDetailsFor(btn.dataset.orderId, root, session));
+  });
+
   container.querySelectorAll(".export").forEach((btn) => {
     btn.addEventListener("click", () => {
       const dateKey = btn.dataset.date;
@@ -464,6 +523,7 @@ function renderOrdersBody(rows, canEdit) {
       ${items ? `<span class="order-items" title="${escapeAttr(items)}">${escapeHtml(items)}</span>` : ""}
       ${flagLabel ? `<span class="exception-badge">${escapeHtml(flagLabel)}</span>` : ""}
       ${movedFromLabel ? `<span class="moved-from">${escapeHtml(movedFromLabel)}</span>` : ""}
+      ${canEdit && !o.details && !o.exception_type ? `<button class="ghost add-details" data-order-id="${escapeAttr(o.order_id)}" title="Paste this order from Zagle to add its products and customer">Add details</button>` : ""}
       <span class="time">${formatTime(o.created_at)}</span>
       ${canEdit && !o.exception_type ? `<button class="ghost icon-btn flag-incomplete" data-id="${o.id}" title="Mark incomplete" aria-label="Mark order ${escapeHtml(o.order_id)} as incomplete">${iconFlag}</button>` : ""}
       ${canEdit && o.exception_type ? `<button class="ghost icon-btn clear-exception" data-id="${o.id}" title="Clear flag" aria-label="Clear exception flag for order ${escapeHtml(o.order_id)}">${iconRotate}</button>` : ""}
@@ -471,7 +531,8 @@ function renderOrdersBody(rows, canEdit) {
     </div>`;
     })
     .join("");
-  const countLabel = `${plural(rows.length, "order")} · ${doneCount} done${flaggedCount ? ` · ${flaggedCount} flagged` : ""}`;
+  const missingCount = rows.filter((r) => !r.details && !r.exception_type).length;
+  const countLabel = `${plural(rows.length, "order")} · ${doneCount} done${flaggedCount ? ` · ${flaggedCount} flagged` : ""}${missingCount ? ` · ${missingCount} missing details` : ""}`;
   return { html, countLabel };
 }
 
@@ -509,7 +570,11 @@ function renderProductsBody(dateKey, rows, canEdit) {
     .join("");
 
   const missingNote = missing.length
-    ? `<p class="pick-missing">No product details for ${escapeHtml(missing.join(", "))} (typed in manually, or captured before this update).</p>`
+    ? `<p class="pick-missing">No product details for ${
+        canEdit
+          ? missing.map((id) => `<button type="button" class="missing-id add-details-link" data-order-id="${escapeAttr(id)}" title="Add details">${escapeHtml(id)}</button>`).join(" ")
+          : escapeHtml(missing.join(", "))
+      } (typed in manually, or captured before this update).${canEdit ? " Click an ID to paste its details from Zagle." : ""}</p>`
     : "";
   const emptyNote = !products.length && !missing.length ? `<p class="pick-missing">No orders to pick for this day.</p>` : "";
   const countLabel = `${plural(products.length, "product")} · ${plural(units, "unit")} · ${collected} collected`;

@@ -1379,3 +1379,85 @@ main.container {
     flex-wrap: wrap;
   }
 }
+
+/* ---------------- Paste order dialog ---------------- */
+
+.exception-dialog.paste-dialog {
+  width: 560px;
+}
+.paste-help {
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+#paste-text {
+  width: 100%;
+  min-height: 130px;
+  resize: vertical;
+  font-size: 13px;
+  font-family: var(--font-body);
+}
+.paste-preview {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.paste-preview:empty {
+  display: none;
+}
+.paste-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.paste-muted {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+.paste-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0;
+}
+.paste-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.paste-num {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-secondary);
+}
+.paste-warn {
+  margin: 0;
+  font-size: 12px;
+  color: #f5b544;
+}
+.order-row .add-details {
+  font-size: 12px;
+  padding: 4px 10px;
+  white-space: nowrap;
+  color: var(--accent);
+  background: var(--accent-tint);
+  border-radius: 100px;
+}
+.order-row .add-details:hover {
+  background: rgba(108, 99, 255, 0.24);
+}
+.pick-missing .missing-id {
+  font: inherit;
+  font-size: 12px;
+  padding: 1px 6px;
+  margin: 0 2px;
+  border-radius: 4px;
+  color: var(--accent);
+  background: var(--accent-tint);
+  border: none;
+}

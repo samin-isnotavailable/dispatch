@@ -1,19 +1,21 @@
 import { supabase } from "./supabaseClient.js";
+import { escapeHtml } from "./escape.js";
 import { iconX, iconRotate } from "./icons.js";
+import { topbarHtml, wireTopbar } from "./topbar.js";
 import { showConfirm } from "./dialogs.js";
 
 export async function renderAdminPanel(root, session) {
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("*") // "*" so this still loads before 0011 adds is_owner
     .eq("id", session.user.id)
     .single();
 
-  if (profile?.role !== "super_admin") {
+  if (profile?.is_owner !== true) {
     root.innerHTML = `
       <div class="auth-screen"><div class="auth-card">
         <h1>Not authorized</h1>
-        <p class="sub">This page is only available to super admins.</p>
+        <p class="sub">Only the owner can manage people and warehouses.</p>
         <button id="back" class="primary">Back to dashboard</button>
       </div></div>`;
     root.querySelector("#back").addEventListener("click", () => {
@@ -29,19 +31,12 @@ export async function renderAdminPanel(root, session) {
 async function paint(root, session, warehouses) {
   const { data: profiles } = await supabase
     .from("profiles")
-    .select("id, full_name, role, warehouse_id")
+    .select("id, full_name, role, warehouse_id, is_owner")
     .order("role", { ascending: false });
 
   root.innerHTML = `
     <div class="app-shell">
-      <div class="topbar">
-        <div class="brand">Dispatch<span class="tag">EZ</span></div>
-        <div class="who">
-          <span class="badge-admin">Admin panel</span>
-          <button class="ghost" id="back-to-dashboard">Back to dashboard</button>
-          <button class="ghost" id="signout">Sign out</button>
-        </div>
-      </div>
+      ${topbarHtml(`<button class="ghost" id="back-to-dashboard">Dashboard</button>`)}
       <main class="container admin-page">
         <div class="date-group">
           <div class="date-group-head"><div class="title"><h3>Add a user</h3></div></div>
@@ -72,7 +67,7 @@ async function paint(root, session, warehouses) {
                 (p) => `
               <div class="user-row" data-user-id="${p.id}">
                 <span class="user-name">${escapeHtml(p.full_name || "(no name)")}</span>
-                <select class="edit-role" data-id="${p.id}">
+                ${p.is_owner ? `<span class="badge-admin">Owner</span>` : `<select class="edit-role" data-id="${p.id}">
                   <option value="staff" ${p.role === "staff" ? "selected" : ""}>Staff</option>
                   <option value="super_admin" ${p.role === "super_admin" ? "selected" : ""}>Super admin</option>
                 </select>
@@ -83,7 +78,7 @@ async function paint(root, session, warehouses) {
                 </select>
                 <button class="save-user" data-id="${p.id}">Save</button>
                 ${p.id !== session.user.id ? `<button class="ghost icon-btn delete-user" data-id="${p.id}" title="Delete user" aria-label="Delete user ${escapeHtml(p.full_name || "this user")}">${iconX}</button>` : ""}
-                <span class="save-status" data-id="${p.id}" aria-live="polite"></span>
+                <span class="save-status" data-id="${p.id}" aria-live="polite"></span>`}
               </div>`
               )
               .join("")}
@@ -98,6 +93,7 @@ async function paint(root, session, warehouses) {
                 (w) => `
               <div class="user-row">
                 <span class="user-name">${escapeHtml(w.name)}</span>
+                <button class="ghost icon-btn delete-warehouse" data-id="${w.id}" title="Remove warehouse" aria-label="Remove warehouse ${escapeHtml(w.name)}">${iconX}</button>
               </div>`
               )
               .join("")}
@@ -115,7 +111,7 @@ async function paint(root, session, warehouses) {
   root.querySelector("#back-to-dashboard").addEventListener("click", () => {
     window.location.href = "/";
   });
-  root.querySelector("#signout").addEventListener("click", () => supabase.auth.signOut());
+  wireTopbar(root);
 
   root.querySelector("#regen-password").addEventListener("click", () => {
     root.querySelector("#new-password").value = generatePassword();
@@ -215,6 +211,28 @@ async function paint(root, session, warehouses) {
     });
   });
 
+  root.querySelectorAll(".delete-warehouse").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const w = warehouses.find((x) => x.id === btn.dataset.id);
+      const staff = profiles.filter((p) => p.warehouse_id === w.id).length;
+      const msg = `Remove ${w.name}?${staff ? ` ${staff} staff assigned to it will have no warehouse until you pick a new one.` : ""} This can't be undone.`;
+      if (!(await showConfirm(msg, { confirmLabel: "Remove", danger: true }))) return;
+      const status = root.querySelector("#warehouse-status");
+      const { error } = await supabase.from("warehouses").delete().eq("id", w.id);
+      if (error) {
+        // orders.warehouse_id is ON DELETE RESTRICT: past orders keep it alive.
+        status.textContent =
+          error.code === "23503"
+            ? `${w.name} still has orders on file, so it can't be removed. Its order history would be lost.`
+            : `Couldn't remove ${w.name}: ${error.message}`;
+        status.style.color = "var(--danger)";
+        return;
+      }
+      const { data: refreshedWarehouses } = await supabase.from("warehouses").select("id, name").order("name");
+      await paint(root, session, refreshedWarehouses || []);
+    });
+  });
+
   root.querySelector("#add-warehouse-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const input = root.querySelector("#new-warehouse-name");
@@ -239,10 +257,4 @@ function generatePassword() {
   let out = "";
   for (let i = 0; i < 12; i++) out += chars[Math.floor(Math.random() * chars.length)];
   return out;
-}
-
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
 }

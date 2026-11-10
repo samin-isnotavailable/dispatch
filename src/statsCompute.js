@@ -22,6 +22,53 @@ export const DISTRICTS = {
   "BD-61": "Sunamganj", "BD-62": "Shariatpur", "BD-63": "Tangail", "BD-64": "Thakurgaon",
 };
 
+// Manual orders have no "BD-xx" code, only the address as typed, so the
+// district is read from the address: the last district (or well-known
+// Dhaka area) named in it wins, since addresses end with the district.
+// shortcut: only common spellings and the main Dhaka areas; add more here
+// when an address shows up as "Unknown".
+const PLACE_CODES = (() => {
+  const map = new Map();
+  for (const [code, name] of Object.entries(DISTRICTS)) map.set(placeKey(name), code);
+  const extra = {
+    "BD-10": ["chittagong", "ctg"],
+    "BD-08": ["comilla"],
+    "BD-06": ["barisal"],
+    "BD-03": ["bogra"],
+    "BD-22": ["jessore"],
+    "BD-11": ["cox bazar"],
+    "BD-45": ["chapainawabganj"],
+    "BD-25": ["jhalokati", "jhalakati"],
+    "BD-41": ["netrokona"],
+    "BD-38": ["maulvibazar", "moulvi bazar"],
+    "BD-04": ["b baria"],
+    "BD-26": ["kishorganj"],
+    "BD-31": ["laxmipur", "lakhsmipur"],
+    "BD-29": ["khagrachari"],
+    "BD-63": ["tangail"],
+    "BD-13": ["mirpur", "uttara", "dhanmondi", "gulshan", "banani", "mohammadpur", "badda", "rampura", "motijheel", "bashundhara", "savar", "keraniganj", "jatrabari", "khilgaon", "tejgaon", "farmgate", "malibagh", "mohakhali", "baridhara", "wari", "lalbagh", "shyamoli", "agargaon", "kafrul", "pallabi", "demra", "khilkhet", "shantinagar", "moghbazar", "dhamrai", "ashulia", "kamrangirchar", "hazaribagh", "shahbagh", "paltan", "azimpur"],
+  };
+  for (const [code, names] of Object.entries(extra)) for (const n of names) map.set(placeKey(n), code);
+  return map;
+})();
+
+function placeKey(text) {
+  return ` ${String(text).toLowerCase().replace(/['’]/g, "").replace(/gonj/g, "ganj").replace(/[^a-z]+/g, " ").trim()} `;
+}
+
+export function districtFromAddress(...parts) {
+  const text = placeKey(parts.filter(Boolean).join(" , "));
+  let best = null;
+  let bestAt = -1;
+  for (const [name, code] of PLACE_CODES) {
+    const at = text.lastIndexOf(name);
+    if (at > bestAt) [best, bestAt] = [code, at];
+  }
+  return best;
+}
+
+export const resolveDistrict = (o) => (o.district && DISTRICTS[o.district] ? o.district : districtFromAddress(o.address, o.area));
+
 // Weeks start on Wednesday, everywhere (week grouping and the heatmap).
 export const WEEKDAYS = ["Wed", "Thu", "Fri", "Sat", "Sun", "Mon", "Tue"];
 

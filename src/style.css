@@ -25,11 +25,70 @@
   --success: #34c77b;
   --success-tint: rgba(52, 199, 123, 0.14);
   --danger: #ff6b6b;
+  --danger-tint: rgba(255, 107, 107, 0.13);
+  --danger-hover: #ff8080;
+  --warning: #f5b544;
+  --warning-tint: rgba(245, 181, 68, 0.14);
+
+  /* Charts */
+  --track: rgba(255, 255, 255, 0.04);
+  --chart: #3987e5;
+  --chart-hover: #5598e7;
+  --heat-0: #1c2e4a;
+  --heat-1: #184f95;
+  --heat-2: #256abf;
+  --heat-3: #3987e5;
+  --heat-4: #6da7ec;
+  --heat-5: #9ec5f4;
+
+  --overlay: rgba(0, 0, 0, 0.55);
+  --shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 
   --font-display: "Inter Tight", sans-serif;
   --font-body: "Inter Tight", -apple-system, sans-serif;
   --radius: 8px;
   color-scheme: dark;
+}
+
+/* Light mode: same names, light values. Chosen with the switch in the top
+   bar (or the device setting until then); see index.html and topbar.js. */
+:root[data-theme="light"] {
+  --bg: #f3f5fa;
+  --surface: #ffffff;
+  --surface-2: #eef1f7;
+  --surface-3: #e2e7f0;
+  --border: #dde3ee;
+  --border-strong: #c3cddd;
+
+  --ink: #131c2e;
+  --ink-secondary: #45526b;
+  --ink-muted: #667189;
+
+  --accent: #5a51ee;
+  --accent-hover: #4a41de;
+  --accent-tint: rgba(90, 81, 238, 0.1);
+
+  --success: #17864d;
+  --success-tint: rgba(23, 134, 77, 0.1);
+  --danger: #d23c3c;
+  --danger-tint: rgba(210, 60, 60, 0.1);
+  --danger-hover: #b92f2f;
+  --warning: #9a5b00;
+  --warning-tint: rgba(214, 140, 20, 0.14);
+
+  --track: rgba(19, 28, 46, 0.05);
+  --chart: #2f74d0;
+  --chart-hover: #255fae;
+  --heat-0: #edf1f8;
+  --heat-1: #cfe0f7;
+  --heat-2: #9ec3ef;
+  --heat-3: #5f9be3;
+  --heat-4: #2f74d0;
+  --heat-5: #1b4f99;
+
+  --overlay: rgba(15, 23, 42, 0.4);
+  --shadow: 0 6px 20px rgba(15, 23, 42, 0.14);
+  color-scheme: light;
 }
 
 * {
@@ -38,6 +97,10 @@
 
 body {
   margin: 0;
+  /* Nothing may make the page wider than the screen: on phones that zooms
+     the whole page out and dialogs no longer line up. clip, not hidden, so
+     the sticky date headers keep working. */
+  overflow-x: clip;
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-body);
@@ -93,8 +156,8 @@ button.danger {
   color: #fff;
 }
 button.danger:hover {
-  background: #ff8080;
-  border-color: #ff8080;
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
 }
 input:disabled,
 select:disabled,
@@ -293,7 +356,17 @@ main.container {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  /* Frozen like a spreadsheet's first row: while you scroll a long day,
+     its date, counts and buttons stay on screen. Stretched over the card's
+     padding so rows scrolling under it are fully hidden. */
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: -16px -18px 12px;
+  padding: 14px 18px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
 }
 .date-group-head .title {
   display: flex;
@@ -356,7 +429,7 @@ main.container {
 }
 .order-row .delete-order:hover {
   color: var(--danger);
-  background: rgba(255, 107, 107, 0.12);
+  background: var(--danger-tint);
 }
 
 /* ---------------- Orders / Products toggle ---------------- */
@@ -431,8 +504,8 @@ main.container {
 .pick-partial {
   font-size: 11px;
   font-weight: 500;
-  color: #f5b544;
-  background: rgba(245, 181, 68, 0.14);
+  color: var(--warning);
+  background: var(--warning-tint);
   padding: 2px 8px;
   border-radius: 100px;
   white-space: nowrap;
@@ -454,7 +527,7 @@ main.container {
   font-size: 11px;
   font-weight: 500;
   color: var(--danger);
-  background: rgba(255, 107, 107, 0.14);
+  background: var(--danger-tint);
   padding: 2px 8px;
   border-radius: 100px;
   white-space: nowrap;
@@ -482,7 +555,7 @@ main.container {
 }
 .order-row .flag-incomplete:hover {
   color: var(--danger);
-  background: rgba(255, 107, 107, 0.12);
+  background: var(--danger-tint);
 }
 .order-row .clear-exception:hover {
   color: var(--accent);
@@ -492,7 +565,7 @@ main.container {
 .exception-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -506,6 +579,24 @@ main.container {
   padding: 24px;
   width: 320px;
   max-width: 100%;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Phones: dialogs slide up from the bottom, full width, like Zagle's. */
+@media (max-width: 560px) {
+  .exception-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .exception-dialog,
+  .exception-dialog.paste-dialog {
+    width: 100%;
+    max-height: 92dvh;
+    border-radius: 16px 16px 0 0;
+    border-bottom: none;
+    padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+  }
 }
 .exception-dialog h3 {
   font-family: var(--font-display);
@@ -772,9 +863,10 @@ main.container {
   }
 
   .topbar {
-    padding: 12px 16px;
-    flex-wrap: wrap;
-    gap: 8px;
+    padding: 10px 12px 10px 16px;
+  }
+  .topbar .who {
+    gap: 4px;
   }
 
   /* Stack input / warehouse picker / button instead of squeezing
@@ -1061,7 +1153,7 @@ main.container {
 }
 .cc-col:hover,
 .cc-col:focus-visible {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--track);
 }
 .cc-bar,
 .cc-stack {
@@ -1069,12 +1161,12 @@ main.container {
   max-width: 24px;
 }
 .cc-bar {
-  background: #3987e5;
+  background: var(--chart);
   border-radius: 4px 4px 0 0;
   min-height: 0;
 }
 .cc-col:hover .cc-bar {
-  background: #5598e7;
+  background: var(--chart-hover);
 }
 .cc-stack {
   height: 100%;
@@ -1140,7 +1232,7 @@ main.container {
 }
 .rb-row:hover,
 .rb-row:focus-visible {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--track);
 }
 .rb-label {
   white-space: nowrap;
@@ -1154,7 +1246,7 @@ main.container {
   display: block;
   height: 100%;
   min-width: 2px;
-  background: #3987e5;
+  background: var(--chart);
   border-radius: 0 4px 4px 0;
 }
 .rb-value {
@@ -1267,13 +1359,13 @@ main.container {
 /* Sparklines */
 .spark polyline {
   fill: none;
-  stroke: #3987e5;
+  stroke: var(--chart);
   stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
 .spark circle {
-  fill: #3987e5;
+  fill: var(--chart);
   stroke: var(--surface);
   stroke-width: 2;
 }
@@ -1292,7 +1384,7 @@ main.container {
   border-radius: 8px;
   padding: 8px 10px;
   font-size: 12px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow);
   max-width: 260px;
 }
 .stats-tip-title {
@@ -1382,8 +1474,10 @@ main.container {
 
 /* ---------------- Paste order dialog ---------------- */
 
-.exception-dialog.paste-dialog {
-  width: 560px;
+@media (min-width: 561px) {
+  .exception-dialog.paste-dialog {
+    width: 560px;
+  }
 }
 .paste-help {
   font-size: 13px;
@@ -1438,7 +1532,7 @@ main.container {
 .paste-warn {
   margin: 0;
   font-size: 12px;
-  color: #f5b544;
+  color: var(--warning);
 }
 .order-row .add-details {
   font-size: 12px;
@@ -1449,7 +1543,7 @@ main.container {
   border-radius: 100px;
 }
 .order-row .add-details:hover {
-  background: rgba(108, 99, 255, 0.24);
+  background: var(--accent-tint);
 }
 .pick-missing .missing-id {
   font: inherit;
@@ -1460,4 +1554,180 @@ main.container {
   color: var(--accent);
   background: var(--accent-tint);
   border: none;
+}
+
+/* ---------------- Calendar (calendar.js) ---------------- */
+
+@media (min-width: 561px) {
+  .exception-dialog.cal-dialog {
+    width: 340px;
+  }
+}
+.cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.cal-month {
+  font-family: var(--font-display);
+  font-size: 15px;
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  row-gap: 6px;
+}
+.cal-dow {
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-muted);
+  padding: 4px 0;
+}
+.cal-day {
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.cal-day:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-radius: 10px;
+}
+.cal-day.outside {
+  color: var(--ink-muted);
+}
+.cal-day.today {
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+/* A picked range is one continuous band per week row, ends rounded. */
+.cal-day.in-range {
+  background: var(--accent-tint);
+}
+.cal-grid .cal-day.in-range:nth-child(7n + 1),
+.cal-day.edge-start {
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+}
+.cal-grid .cal-day.in-range:nth-child(7n),
+.cal-day.edge-end {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+.cal-day.edge,
+.cal-day.edge:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.cal-summary {
+  margin: 12px 0 0;
+  min-height: 1.5em;
+  font-size: 13px;
+  color: var(--ink-secondary);
+  text-align: center;
+}
+
+/* Statistics period buttons (Today / Last 7 days / … / calendar) */
+.period-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.period-bar button {
+  font-size: 13px;
+  padding: 7px 14px;
+  border-radius: 100px;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--ink-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.period-bar button svg {
+  width: 14px;
+  height: 14px;
+}
+.period-bar button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* Statistics: incomplete-data warning and parcels per warehouse */
+.stats-warning {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--warning);
+  background: var(--warning-tint);
+  font-size: 13px;
+}
+.stats-warning strong {
+  color: var(--warning);
+}
+.stats-warning span {
+  color: var(--ink-secondary);
+  overflow-wrap: anywhere;
+}
+.stats-section.stats-section-first {
+  margin-top: 4px;
+}
+.wh-tile {
+  border-top: 3px solid var(--wh);
+}
+.wh-tile .stats-tile-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.wh-tile .stats-tile-label i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--wh);
+}
+.wh-tile .stats-tile-value {
+  font-size: 30px;
+}
+
+/* Paste dialog: "From screenshot" */
+.paste-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+.button-like {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.button-like:hover {
+  background: var(--surface-3);
+  border-color: var(--accent);
+}
+.button-like svg {
+  width: 15px;
+  height: 15px;
 }

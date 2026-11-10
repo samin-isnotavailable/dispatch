@@ -1,5 +1,6 @@
 import Papa from "papaparse";
 import { supabase } from "./supabaseClient.js";
+import { escapeHtml } from "./escape.js";
 import { iconX, iconChevronDown, iconPencil, iconDownload } from "./icons.js";
 import { showAlert, showConfirm, showEditBatch } from "./dialogs.js";
 
@@ -614,10 +615,4 @@ function formatDateTime(iso) {
   const date = d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
   const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
   return `${date}, ${time}`;
-}
-
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
 }

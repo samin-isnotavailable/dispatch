@@ -219,3 +219,145 @@ export function parseOrderText(raw) {
   };
   return result;
 }
+
+// Text read from a screenshot (ocr.js) differs from copied text: ৳ comes out
+// as "»", "v", "b" or nothing; "WOO" as "WO0"; labels and amounts share a
+// line ("Delivery b130"); long names and addresses wrap onto two lines.
+// This rewrites it into the copied-text shape parseOrderText expects.
+const LABEL_MONEY_RE = new RegExp(
+  `^(${SUMMARY_LABELS.join("|")})(?:\\s+(Paid|Unpaid|Partially paid|Partial|Refunded))?\\s+([−-])?\\s*[^\\s\\d]{0,2}\\s*([\\d,]+(?:\\.\\d+)?)$`,
+  "i"
+);
+const OCR_QTY_RE = /^(\d+)\s*[x×]\s*[^\s\d]{0,2}\s*([\d,]+(?:\.\d+)?)(?:\s+[^\s\d]{0,2}\s*([\d,]+(?:\.\d+)?))?$/i;
+
+// Desktop screenshots: Zagle shows the order as three columns side by side
+// (customer | products | totals), and plain OCR text reads straight across
+// them. This uses each word's position instead: the "1 item" heading marks
+// where the products column starts, "Delivery" / "Due" where the totals
+// start. Returns null for a one-column (phone) screenshot.
+// `lines` are tesseract lines: { bbox, words: [{ text, bbox: { x0, x1 } }] }.
+export function textFromOcrLayout(lines) {
+  // Split each line into pieces wherever words are far apart (wider than the line is tall).
+  const rows = lines.map((l) => {
+    const gap = l.bbox.y1 - l.bbox.y0;
+    const segs = [];
+    let cur = null;
+    for (const w of l.words) {
+      const t = w.text.trim();
+      if (!t) continue;
+      if (cur && w.bbox.x0 - cur.x1 <= gap) {
+        cur.text += ` ${t}`;
+        cur.x1 = w.bbox.x1;
+      } else segs.push((cur = { text: t, x0: w.bbox.x0, x1: w.bbox.x1 }));
+    }
+    return segs;
+  });
+  const all = rows.flat();
+  const width = Math.max(1, ...all.map((s) => s.x1));
+  const countSeg = all.find((s) => /^\d+\s*items?\b/i.test(s.text));
+  const itemsLeft = countSeg?.x0 ?? 0;
+  const summaryLeft = Math.min(...all.filter((s) => /^(Delivery|Due|Discount)\b/i.test(s.text) && s.x0 > itemsLeft).map((s) => s.x0));
+  if (!countSeg || itemsLeft < width * 0.2 || !Number.isFinite(summaryLeft)) return null;
+
+  const tol = 12;
+  const head = [];
+  const customer = [];
+  const products = [];
+  const totals = [];
+  const isNumber = (t) => /^[^\s\d]?\s*[\d,.]+$/.test(t);
+  const digits = (t) => t.replace(/[^\d,.]/g, "");
+  let item = null;
+  const headRow = rows.findIndex((r) => r.some((s) => /^(W[O0]{1,3}|[O0]R[D0])\s*[-–—]\s*\d/i.test(s.text)));
+  rows.forEach((row, i) => {
+    if (i === headRow) return head.push(...row.map((s) => s.text.replace(/\s+\S$/, ""))); // "Processing v" (the dropdown arrow)
+    const mid = [];
+    const right = [];
+    for (const s of row) {
+      if (s.x0 < itemsLeft - tol) customer.push(s.text);
+      else if (s.x0 >= summaryLeft - tol) right.push(s.text);
+      else mid.push(s);
+    }
+    if (right.length) totals.push(right.join(" ")); // "Delivery" … "৳65" sit far apart on one row
+    if (!mid.length) return;
+    if (mid.includes(countSeg)) return products.push(countSeg.text);
+    const [name, ...nums] = mid;
+    if (nums.length >= 2 && nums.every((n) => isNumber(n.text))) {
+      // A product's first line has its qty, price and total beside the name.
+      item = { name: name.text, qty: digits(nums[0].text), price: digits(nums[1].text), total: nums[2] ? digits(nums[2].text) : null };
+      products.push(item);
+    } else if (item) item.name += ` ${mid.map((s) => s.text).join(" ")}`; // the name wrapped onto another line
+  });
+  const productLines = products.flatMap((p) => (typeof p === "string" ? [p] : [p.name, `${p.qty} × ৳${p.price}`, ...(p.total ? [`৳${p.total}`] : [])]));
+  return [...head, ...customer, ...productLines, ...totals].join("\n");
+}
+
+export function cleanOcrText(raw) {
+  const out = [];
+  let inItems = false;
+  let joinNext = false; // previous line ended with "," (a wrapped address)
+  const lines = String(raw || "").split(/\r?\n/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+  for (let line of lines) {
+    // "WO00-42738" / "0RD-…" → "WOO-42738" / "ORD-…", and split off a status after it.
+    line = line.replace(/^W[O0]{1,3}\s*[-–—]\s*(?=\d)/i, "WOO-").replace(/^[O0]R[D0]\s*[-–—]\s*(?=\d)/i, "ORD-");
+    const idRest = line.match(/^((?:WOO|ORD)-[\d-]+)\s+(.+)$/);
+    if (idRest) {
+      out.push(idRest[1], idRest[2]);
+      continue;
+    }
+    line = line.replace(/^(\d+)\s*(items?)\b.*$/i, "$1 $2"); // "1 item Qty Price Total" → "1 item"
+    line = line.replace(/^[Il1|]?tems(?=\s)/, "Items"); // "tems ৳5,699": the I is often lost
+    const phoneRest = line.match(/^((?:\+?88)?01\d{9})\s+\d+%\s*reliable$/i);
+    if (phoneRest) line = phoneRest[1];
+    if (joinNext) {
+      out[out.length - 1] += ` ${line}`;
+      joinNext = /,$/.test(line);
+      continue;
+    }
+    joinNext = /,$/.test(line) && !inItems;
+
+    const lm = line.match(LABEL_MONEY_RE);
+    if (lm) {
+      inItems = false;
+      const label = SUMMARY_LABELS.find((s) => s.toLowerCase() === lm[1].toLowerCase());
+      out.push(label);
+      if (lm[2]) out.push(lm[2]);
+      out.push(`${lm[3] ? "−" : ""}৳${lm[4]}`);
+      continue;
+    }
+    const q = line.match(OCR_QTY_RE);
+    if (q) {
+      out.push(`${q[1]} × ৳${q[2]}`);
+      if (q[3]) out.push(`৳${q[3]}`);
+      continue;
+    }
+    if (ITEMS_RE.test(line)) {
+      inItems = true;
+      out.push(line);
+      continue;
+    }
+    // A product name wrapped onto a second line: join it back.
+    const prev = out[out.length - 1];
+    const isText = (l) => l && !/^\d/.test(l) && !ITEMS_RE.test(l) && !/৳/.test(l) && /\s/.test(l);
+    if (inItems) line = line.replace(/(\d) ?[x×] ?(\d)/g, "$1 × $2"); // "700 x 300 mm" as Zagle writes it
+    if (inItems && isText(line) && isText(prev) && !ITEMS_RE.test(prev)) {
+      out[out.length - 1] = `${prev} ${line}`;
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+// Product names from a screenshot can lose a space or swap look-alike
+// characters ("X1V2" for "X1 V2", "0" for "O"). productKey drops exactly
+// those differences, so a read name can be matched to a name already sold.
+// Only an exact key match counts: one real character apart ("X1" / "X2")
+// is a different product.
+export const productKey = (name) =>
+  String(name).toLowerCase().replace(/[^a-z0-9]/g, "").replace(/0/g, "o").replace(/[1i]/g, "l");
+
+// { name, known } — the sold name when there's a match, else the read name.
+export function matchKnownProduct(name, keyToName) {
+  const known = keyToName.get(productKey(name));
+  return known ? { name: known, known: true } : { name, known: false };
+}

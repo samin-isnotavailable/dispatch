@@ -5,18 +5,20 @@
 // is also in that table.
 
 import { supabase } from "./supabaseClient.js";
-import { computeStats, filterOptions, WEEKDAYS, addDaysKey, daysBetween, DISTRICTS } from "./statsCompute.js";
+import { escapeHtml as esc } from "./escape.js";
+import { computeStats, filterOptions, WEEKDAYS, addDaysKey, daysBetween, DISTRICTS, resolveDistrict } from "./statsCompute.js";
+import { pickRange } from "./calendar.js";
+import { iconCalendar } from "./icons.js";
 
 const STATE_KEY = "dispatchez.statsFilters";
 const MAX_RANGE_DAYS = 366;
+// The period always starts on Today when the tab opens; the other filters
+// are remembered.
 const PRESETS = [
   { id: "today", label: "Today" },
   { id: "7d", label: "Last 7 days" },
   { id: "30d", label: "Last 30 days" },
   { id: "month", label: "This month" },
-  { id: "lastmonth", label: "Last month" },
-  { id: "90d", label: "Last 90 days" },
-  { id: "custom", label: "Custom range" },
 ];
 
 // Categorical slots, validated against the card surface (#152238) for
@@ -24,8 +26,8 @@ const PRESETS = [
 // order so a warehouse keeps its colour whatever the filter.
 const SERIES = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
 const OTHER_COLOR = "#5b6b85";
-// Sequential blue for the heatmap: more orders = brighter on the dark surface.
-const HEAT = ["#1c2e4a", "#184f95", "#256abf", "#3987e5", "#6da7ec", "#9ec5f4"];
+// Heatmap shades, light to strong; the colours are set per theme in style.css.
+const HEAT = [0, 1, 2, 3, 4, 5].map((i) => `var(--heat-${i})`);
 
 let state = loadState();
 let warehouses = [];
@@ -40,19 +42,11 @@ let scrollBound = false;
 export async function renderStats(body, { warehouses: whs }) {
   warehouses = whs || [];
   body.innerHTML = `
+    <div class="period-bar" role="group" aria-label="Period">
+      ${PRESETS.map((p) => `<button type="button" data-preset="${p.id}">${p.label}</button>`).join("")}
+      <button type="button" data-preset="custom" id="stats-calendar">${iconCalendar}<span>Pick dates</span></button>
+    </div>
     <div class="stats-filters" role="group" aria-label="Statistics filters">
-      <label class="stats-field">
-        <span>Period</span>
-        <select id="stats-preset">${PRESETS.map((p) => `<option value="${p.id}">${p.label}</option>`).join("")}</select>
-      </label>
-      <label class="stats-field stats-custom">
-        <span>From</span>
-        <input type="date" id="stats-from" />
-      </label>
-      <label class="stats-field stats-custom">
-        <span>To</span>
-        <input type="date" id="stats-to" />
-      </label>
       <label class="stats-field">
         <span>Warehouse</span>
         <select id="stats-warehouse">
@@ -73,7 +67,7 @@ export async function renderStats(body, { warehouses: whs }) {
         <span>District</span>
         <select id="stats-district"></select>
       </label>
-      <div class="stats-field">
+      <div class="stats-field" id="stats-gran-field">
         <span>Group by</span>
         <div class="view-toggle stats-gran" role="group" aria-label="Group charts by">
           <button type="button" data-gran="day">Day</button>
@@ -90,21 +84,21 @@ export async function renderStats(body, { warehouses: whs }) {
     <div id="stats-content"><p class="empty-note">Loading statistics…</p></div>
   `;
 
-  const presetEl = body.querySelector("#stats-preset");
-  const fromEl = body.querySelector("#stats-from");
-  const toEl = body.querySelector("#stats-to");
   const whEl = body.querySelector("#stats-warehouse");
   const content = body.querySelector("#stats-content");
-
-  presetEl.value = state.preset;
   whEl.value = warehouses.some((w) => w.id === state.warehouse) ? state.warehouse : "";
-  if (state.preset === "custom") {
-    fromEl.value = state.from;
-    toEl.value = state.to;
-  }
 
   const sync = () => {
-    body.querySelectorAll(".stats-custom").forEach((el) => (el.style.display = state.preset === "custom" ? "" : "none"));
+    body.querySelectorAll(".period-bar button").forEach((b) => {
+      const on = b.dataset.preset === state.preset;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-pressed", String(on));
+    });
+    body.querySelector("#stats-calendar span").textContent =
+      state.preset === "custom" ? (state.from === state.to ? formatDay(state.from, true) : `${formatDay(state.from)} – ${formatDay(state.to, true)}`) : "Pick dates";
+    // One day has nothing to group.
+    const r = rangeFor(state);
+    body.querySelector("#stats-gran-field").style.display = r.from === r.to ? "none" : "";
     body.querySelectorAll(".stats-gran button").forEach((b) => {
       const on = b.dataset.gran === state.granularity;
       b.classList.toggle("active", on);
@@ -113,29 +107,25 @@ export async function renderStats(body, { warehouses: whs }) {
   };
   sync();
 
-  presetEl.addEventListener("change", () => {
-    state.preset = presetEl.value;
-    if (state.preset === "custom") {
-      const r = rangeFor(state);
-      fromEl.value = fromEl.value || r.from;
-      toEl.value = toEl.value || r.to;
-      state.from = fromEl.value;
-      state.to = toEl.value;
-    }
+  const setPeriod = (preset) => {
+    state.preset = preset;
     state.granularity = defaultGranularity(rangeFor(state));
     sync();
     saveState();
     load(body);
-  });
-  const onCustom = () => {
-    if (!fromEl.value || !toEl.value) return;
-    state.from = fromEl.value <= toEl.value ? fromEl.value : toEl.value;
-    state.to = fromEl.value <= toEl.value ? toEl.value : fromEl.value;
-    saveState();
-    load(body);
   };
-  fromEl.addEventListener("change", onCustom);
-  toEl.addEventListener("change", onCustom);
+  body.querySelectorAll(".period-bar button").forEach((b) =>
+    b.addEventListener("click", async () => {
+      if (b.dataset.preset !== "custom") return setPeriod(b.dataset.preset);
+      const r = rangeFor(state);
+      const picked = await pickRange({ from: r.from, to: r.to, max: todayKey(), title: "Statistics for" });
+      if (!picked) return;
+      if (daysBetween(picked.from, picked.to) >= MAX_RANGE_DAYS) picked.from = addDaysKey(picked.to, -(MAX_RANGE_DAYS - 1));
+      state.from = picked.from;
+      state.to = picked.to;
+      setPeriod("custom");
+    })
+  );
   whEl.addEventListener("change", () => {
     state.warehouse = whEl.value;
     saveState();
@@ -230,6 +220,7 @@ async function load(body) {
     return;
   }
 
+  for (const o of data.orders || []) o.district = resolveDistrict(o);
   lastDataset = data;
   redraw(body);
 }
@@ -249,7 +240,7 @@ function redraw(body) {
   body.querySelector("#stats-clear").style.display = active.length ? "" : "none";
   body.querySelector("#stats-range-label").textContent =
     `${formatDay(from, true)} – ${formatDay(to, true)} · by dispatch date` + (active.length ? ` · ${active.join(" · ")}` : "");
-  content.innerHTML = stats.kpi.orders ? renderAll(stats) : renderEmpty(active.length > 0);
+  content.innerHTML = missingWarning(lastDataset) + parcelsSection(lastDataset) + (stats.kpi.orders ? renderAll(stats, from === to) : renderEmpty(active.length > 0));
 }
 
 // Rebuild the Sold by / District / product choices from the fetched range,
@@ -261,16 +252,16 @@ function fillFilterOptions(body, opts) {
   if (currentSeller) sellers.add(currentSeller);
   soldEl.innerHTML =
     `<option value="">Everyone</option><option value="website">Website orders</option><option value="manual">All manual orders</option>` +
-    [...sellers].sort((a, b) => a.localeCompare(b)).map((n) => `<option value="${escAttr(`seller:${n}`)}">${esc(n)}</option>`).join("");
+    [...sellers].sort((a, b) => a.localeCompare(b)).map((n) => `<option value="${esc(`seller:${n}`)}">${esc(n)}</option>`).join("");
   soldEl.value = state.soldBy;
 
   const distEl = body.querySelector("#stats-district");
   const districts = [...opts.districts];
   if (state.district && !districts.some((d) => d.code === state.district)) districts.push({ code: state.district, name: DISTRICTS[state.district] || "Unknown" });
-  distEl.innerHTML = `<option value="">All districts</option>` + districts.map((d) => `<option value="${escAttr(d.code)}">${esc(d.name)}</option>`).join("");
+  distEl.innerHTML = `<option value="">All districts</option>` + districts.map((d) => `<option value="${esc(d.code)}">${esc(d.name)}</option>`).join("");
   distEl.value = state.district;
 
-  body.querySelector("#stats-product-list").innerHTML = opts.products.map((n) => `<option value="${escAttr(n)}"></option>`).join("");
+  body.querySelector("#stats-product-list").innerHTML = opts.products.map((n) => `<option value="${esc(n)}"></option>`).join("");
 }
 
 function activeFilterLabels() {
@@ -297,12 +288,57 @@ function renderEmpty(filtered = false) {
   }
   return `
     <div class="stats-card">
-      <h3>No orders in this period</h3>
-      <p class="stats-note">Statistics only count orders sent from Zagle with the updated extension (version 0.2.0 or later), since they carry products and amounts. Orders typed in by hand, or captured before the update, aren't included.</p>
+      <h3>No orders with details in this period</h3>
+      <p class="stats-note">Revenue, products and customers come from orders that have their details (sent from Zagle with the extension, or pasted). Orders typed in by hand only count as parcels until their details are added.</p>
     </div>`;
 }
 
-function renderAll(s) {
+// Orders in the period saved with only their ID: counted as parcels, but
+// missing from revenue, products and customers until their details are added.
+function missingWarning(ds) {
+  const missing = ds.missing || [];
+  if (!missing.length) return "";
+  const whName = new Map(warehouses.map((w) => [w.id, w.name]));
+  const total = (ds.parcels || []).reduce((t, p) => t + Number(p.missing || 0), 0) || missing.length;
+  const list = missing
+    .slice(0, 12)
+    .map((m) => `${m.id} (${whName.get(m.wh) || "?"}, ${formatDay(m.date)})`)
+    .join(", ");
+  return `
+    <div class="stats-warning" role="status">
+      <strong>${int(total)} ${total === 1 ? "order has" : "orders have"} no details, so the numbers below are incomplete.</strong>
+      <span>They count as parcels, but not in revenue, products or customers. Use "Add details" on ${total === 1 ? "it" : "them"} in the warehouse tab: ${esc(list)}${total > 12 ? ", …" : ""}</span>
+    </div>`;
+}
+
+// Parcels dispatched per warehouse: every order, with or without details.
+function parcelsSection(ds) {
+  const rows = (ds.parcels || []).map((p) => ({ ...p, parcels: Number(p.parcels) || 0, missing: Number(p.missing) || 0 }));
+  const total = rows.reduce((t, p) => t + p.parcels, 0);
+  if (!total) return "";
+  const color = new Map(warehouses.map((w, i) => [w.id, i < SERIES.length ? SERIES[i] : OTHER_COLOR]));
+  const named = warehouses.filter((w) => rows.some((r) => r.wh === w.id)).map((w) => ({ ...rows.find((r) => r.wh === w.id), name: w.name, color: color.get(w.id) }));
+  const tiles = named
+    .map(
+      (w) => `
+      <div class="stats-tile wh-tile" style="--wh:${w.color}">
+        <div class="stats-tile-label"><i></i>${esc(w.name)}</div>
+        <div class="stats-tile-value">${int(w.parcels)}</div>
+        <div class="stats-tile-note">${pct(w.parcels / total)} of parcels${w.missing ? ` · ${int(w.missing)} without details` : ""}</div>
+      </div>`
+    )
+    .join("");
+  const bar =
+    named.length > 1
+      ? tallSegmentedBar(named.map((w) => ({ label: w.name, value: w.parcels, share: w.parcels / total, color: w.color, tip: { title: w.name, rows: [{ label: "Parcels", value: `${int(w.parcels)} (${pct(w.parcels / total)})`, strong: true }] } })))
+      : "";
+  return `
+    <h2 class="stats-section stats-section-first">Parcels dispatched · ${int(total)}</h2>
+    <div class="stats-kpis wh-tiles">${tiles}</div>
+    ${bar}`;
+}
+
+function renderAll(s, singleDay = false) {
   const k = s.kpi;
   const c = s.customers;
   const labels = s.buckets.map((b) => bucketLabel(b));
@@ -542,15 +578,15 @@ function renderAll(s) {
   return `
     ${kpis}
     <h2 class="stats-section">Sales</h2>
-    <div class="stats-grid">${revenueCard}${channelCard}${couponCard}${heatCard}</div>
+    <div class="stats-grid">${singleDay ? "" : revenueCard}${channelCard}${couponCard}${heatCard}</div>
     <h2 class="stats-section">Products</h2>
-    <div class="stats-grid">${unitsCard}${topCard}${slowCard}${productsCard}${variantCard}${brandCard}${pairsCard}</div>
-    <h2 class="stats-section">Warehouses and districts</h2>
-    <div class="stats-grid">${loadCard}${districtCard}</div>
+    <div class="stats-grid">${singleDay ? "" : unitsCard}${topCard}${slowCard}${productsCard}${variantCard}${brandCard}${pairsCard}</div>
+    <h2 class="stats-section">${singleDay ? "Districts" : "Warehouses and districts"}</h2>
+    <div class="stats-grid">${singleDay ? "" : loadCard}${districtCard}</div>
     <h2 class="stats-section">Customers</h2>
     ${customerKpis}
     <div class="stats-grid">${customersCard}</div>
-    <p class="stats-note stats-footnote">Counts orders sent from Zagle with product details, by dispatch date. Cancelled orders and the original row of a moved order are left out; an order ID recorded twice counts once.</p>
+    <p class="stats-note stats-footnote">Parcels count every order by dispatch date. Everything else counts orders with details. Cancelled orders and the original row of a moved order are left out; an order ID recorded twice counts once.</p>
   `;
 }
 
@@ -620,7 +656,7 @@ function xLabels(labels) {
 function columnChart({ values, labels, format, tipFor }) {
   const { top, step } = niceMax(Math.max(0, ...values));
   const cols = values
-    .map((v, i) => `<div class="cc-col" ${tipAttr(tipFor(i))} aria-label="${escAttr(labels[i])}: ${escAttr(format(v))}"><div class="cc-bar" style="height:${top ? (v / top) * 100 : 0}%"></div></div>`)
+    .map((v, i) => `<div class="cc-col" ${tipAttr(tipFor(i))} aria-label="${esc(labels[i])}: ${esc(format(v))}"><div class="cc-bar" style="height:${top ? (v / top) * 100 : 0}%"></div></div>`)
     .join("");
   return `
     <div class="cc">
@@ -641,7 +677,7 @@ function stackedColumnChart({ series, labels, tipFor }) {
         .filter((s) => s.values[i] > 0)
         .map((s) => `<div class="cc-seg" style="height:${(s.values[i] / top) * 100}%;background:${s.color}"></div>`)
         .join("");
-      return `<div class="cc-col" ${tipAttr(tipFor(i))} aria-label="${escAttr(l)}: ${escAttr(int(totals[i]))} units"><div class="cc-stack">${segs}</div></div>`;
+      return `<div class="cc-col" ${tipAttr(tipFor(i))} aria-label="${esc(l)}: ${esc(int(totals[i]))} units"><div class="cc-stack">${segs}</div></div>`;
     })
     .join("");
   const legend = series.length > 1 ? `<div class="stats-legend">${series.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join("")}</div>` : "";
@@ -663,7 +699,7 @@ function rankedBars(rows) {
     .map(
       (r) => `
       <div class="rb-row" ${tipAttr(r.tip)}>
-        <span class="rb-label" title="${escAttr(r.label)}">${esc(r.label)}</span>
+        <span class="rb-label" title="${esc(r.label)}">${esc(r.label)}</span>
         <span class="rb-track"><span class="rb-bar" style="width:${(r.value / max) * 100}%"></span></span>
         <span class="rb-value">${esc(r.display)}</span>
       </div>`
@@ -676,7 +712,7 @@ function tallSegmentedBar(parts) {
   const visible = parts.filter((p) => p.value > 0);
   if (!visible.length) return "";
   return `
-    <div class="tsb" role="img" aria-label="${escAttr(visible.map((p) => `${p.label} ${pct(p.share)}`).join(", "))}">
+    <div class="tsb" role="img" aria-label="${esc(visible.map((p) => `${p.label} ${pct(p.share)}`).join(", "))}">
       ${visible.map((p) => `<div class="tsb-part" style="flex-grow:${p.value};background:${p.color}" ${tipAttr(p.tip)}><span>${p.share >= 0.12 ? esc(pct(p.share)) : ""}</span></div>`).join("")}
     </div>
     <div class="stats-legend">${visible.map((p) => `<span><i style="background:${p.color}"></i>${esc(p.label)}</span>`).join("")}</div>`;
@@ -913,12 +949,8 @@ function rangeFor(st) {
       return { from: addDaysKey(today, -6), to: today };
     case "month":
       return { from: monthStart, to: today };
-    case "lastmonth": {
-      const lastEnd = addDaysKey(monthStart, -1);
-      return { from: `${lastEnd.slice(0, 8)}01`, to: lastEnd };
-    }
-    case "90d":
-      return { from: addDaysKey(today, -89), to: today };
+    case "30d":
+      return { from: addDaysKey(today, -29), to: today };
     case "custom": {
       let from = st.from || addDaysKey(today, -29);
       let to = st.to || today;
@@ -926,7 +958,7 @@ function rangeFor(st) {
       return { from, to };
     }
     default:
-      return { from: addDaysKey(today, -29), to: today };
+      return { from: today, to: today };
   }
 }
 
@@ -936,14 +968,13 @@ function defaultGranularity({ from, to }) {
 }
 
 function loadState() {
-  const fallback = { preset: "30d", from: "", to: "", warehouse: "", granularity: "day", product: "", soldBy: "", district: "" };
+  const fallback = { preset: "today", from: "", to: "", warehouse: "", granularity: "day", product: "", soldBy: "", district: "" };
   try {
     const saved = JSON.parse(localStorage.getItem(STATE_KEY) || "null");
-    if (!saved || !PRESETS.some((p) => p.id === saved.preset)) return fallback;
+    if (!saved) return fallback;
     return {
       ...fallback,
-      ...saved,
-      granularity: ["day", "week", "month"].includes(saved.granularity) ? saved.granularity : "day",
+      warehouse: typeof saved.warehouse === "string" ? saved.warehouse : "",
       product: typeof saved.product === "string" ? saved.product : "",
       soldBy: typeof saved.soldBy === "string" ? saved.soldBy : "",
       district: typeof saved.district === "string" ? saved.district : "",
@@ -1012,15 +1043,4 @@ function hourLabel(h, short = false) {
   const suffix = h < 12 ? "AM" : "PM";
   const hr = h % 12 === 0 ? 12 : h % 12;
   return short ? `${hr}${suffix.toLowerCase()}` : `${hr} ${suffix}`;
-}
-
-function esc(str) {
-  return String(str ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function escAttr(str) {
-  return esc(str).replace(/"/g, "&quot;");
 }

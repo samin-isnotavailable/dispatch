@@ -1,7 +1,15 @@
 import { supabase } from "./supabaseClient.js";
+import { escapeHtml } from "./escape.js";
 import { iconX, iconFlag, iconRotate } from "./icons.js";
 import { showAlert, showConfirm, showDuplicateWarning, showOrderPaste } from "./dialogs.js";
 import { parseOrderText, normalizeOrderId } from "./orderTextParser.js";
+import { topbarHtml, wireTopbar } from "./topbar.js";
+import { imageFromClipboard } from "./ocr.js";
+import { pickDate, formatKey } from "./calendar.js";
+
+// The dispatch list shows this many recent days. Older orders stay in the
+// database and in Statistics.
+const DAYS_SHOWN = 60;
 
 let profile = null;
 let warehouses = [];
@@ -50,13 +58,10 @@ export async function renderDashboard(root, session) {
   if (!warehouses.length) {
     root.innerHTML = `<div class="auth-screen"><div class="auth-card">
       <h1>No warehouses yet</h1>
-      <p class="sub">${profile.role === "super_admin" ? "Add your first warehouse from the admin panel." : "Ask your admin to set up a warehouse."}</p>
-      ${profile.role === "super_admin" ? `<button id="go-admin" class="primary">Go to admin panel</button>` : ""}
+      <p class="sub">Add a warehouse at /admin (owner only).</p>
       <button id="signout">Sign out</button>
     </div></div>`;
     root.querySelector("#signout").addEventListener("click", () => supabase.auth.signOut());
-    const goAdminBtn = root.querySelector("#go-admin");
-    if (goAdminBtn) goAdminBtn.addEventListener("click", () => (window.location.href = "/admin"));
     return;
   }
 
@@ -66,20 +71,12 @@ export async function renderDashboard(root, session) {
     (profile.role === "staff" && profile.warehouse_id) || warehouses[0].id;
 
   await paint(root, session);
-  subscribeRealtime(root, session);
 }
 
 async function paint(root, session) {
   root.innerHTML = `
     <div class="app-shell">
-      <div class="topbar">
-        <div class="brand">Dispatch<span class="tag">EZ</span></div>
-        <div class="who">
-          ${profile.role === "super_admin" ? `<span class="badge-admin">Super admin</span><a href="/admin" style="color:var(--ink-secondary);font-size:13px;text-decoration:none">Admin panel</a>` : ""}
-          <span>${profile.full_name || session.user.email}</span>
-          <button class="ghost" id="signout">Sign out</button>
-        </div>
-      </div>
+      ${topbarHtml()}
       <main class="container">
         <div class="tabs" id="tabs"></div>
         <div id="view-body"></div>
@@ -87,7 +84,7 @@ async function paint(root, session) {
     </div>
   `;
 
-  root.querySelector("#signout").addEventListener("click", () => supabase.auth.signOut());
+  wireTopbar(root);
   renderTabs(root, session);
 
   if (activeView === "notes") {
@@ -107,7 +104,7 @@ async function paintWarehouseView(root, session) {
   const body = root.querySelector("#view-body");
   body.innerHTML = `
     <div class="manual-add">
-      <input type="text" id="manual-order-id" placeholder="Order ID (WOO-42420 or just 42420), or paste a whole order" />
+      <input type="text" id="manual-order-id" placeholder="Order ID (WOO-42420 or just 42420), or paste a whole order or a screenshot" />
       <select id="manual-warehouse"></select>
       <button class="primary" id="manual-add-btn">Add order</button>
       <button id="paste-order-btn" title="Paste a whole order copied from Zagle">Paste order</button>
@@ -136,6 +133,7 @@ async function paintWarehouseView(root, session) {
     })
   );
   renderManualAdd(root, session);
+  subscribeRealtime(root, session);
   await loadOrdersForActiveWarehouse(root, session);
 }
 
@@ -257,10 +255,10 @@ function renderManualAdd(root, session) {
 
   // A whole order pasted into the box (more than one line) opens the
   // preview instead of being squashed into the one-line ID field.
-  const openPaste = async (text = "") => {
+  const openPaste = async (text = "", image = null) => {
     const warehouseId = select.value;
     if (!warehouseId) return;
-    const pasted = await showOrderPaste({ parse: parseOrderText, normalize: normalizeOrderId, initialText: text, saveLabel: "Add order" });
+    const pasted = await showOrderPaste({ parse: parseOrderText, normalize: normalizeOrderId, initialText: text, initialImage: image, saveLabel: "Add order", knownProducts });
     if (!pasted) return;
     if (await saveCapture(root, session, { orderId: pasted.orderId, warehouseId, details: pasted.details })) input.value = "";
   };
@@ -268,6 +266,13 @@ function renderManualAdd(root, session) {
   root.querySelector("#manual-add-btn").addEventListener("click", submitOrder);
   root.querySelector("#paste-order-btn").addEventListener("click", () => openPaste());
   input.addEventListener("paste", (e) => {
+    // A screenshot pasted here is read in the paste window.
+    const image = imageFromClipboard(e);
+    if (image) {
+      e.preventDefault();
+      openPaste("", image);
+      return;
+    }
     const text = e.clipboardData?.getData("text") || "";
     if (!/\n/.test(text.trim())) return; // a plain ID: let it paste normally
     e.preventDefault();
@@ -313,6 +318,20 @@ async function saveCapture(root, session, { orderId, warehouseId, details }) {
   return true;
 }
 
+// Product names sold so far, fetched once per visit, for matching names
+// read from screenshots (0013_known_product_names.sql).
+let productNamesPromise = null;
+function knownProducts() {
+  productNamesPromise ??= supabase.rpc("known_product_names").then(({ data, error }) => {
+    if (error) {
+      productNamesPromise = null; // try again next time
+      return [];
+    }
+    return data || [];
+  });
+  return productNamesPromise;
+}
+
 // "Add details" on an order saved with only its ID.
 async function addDetailsFor(orderId, root, session) {
   const pasted = await showOrderPaste({
@@ -321,6 +340,7 @@ async function addDetailsFor(orderId, root, session) {
     title: `Add details for ${orderId}`,
     expectOrderId: orderId,
     saveLabel: "Save details",
+    knownProducts,
   });
   if (!pasted) return;
   // Update this order's ID-only record(s) directly. Never goes through
@@ -350,8 +370,13 @@ async function loadOrdersForActiveWarehouse(root, session) {
       .from("orders")
       .select("id, order_id, warehouse_id, done, created_at, created_by, dispatch_date, exception_type, exception_note, rescheduled_to_id, details")
       .eq("warehouse_id", warehouseId)
+      .gte("dispatch_date", addDays(todayDateKey(), -DAYS_SHOWN))
       .order("created_at", { ascending: false }),
-    supabase.from("pick_marks").select("dispatch_date, product_name, picked_qty").eq("warehouse_id", warehouseId),
+    supabase
+      .from("pick_marks")
+      .select("dispatch_date, product_name, picked_qty")
+      .eq("warehouse_id", warehouseId)
+      .gte("dispatch_date", addDays(todayDateKey(), -DAYS_SHOWN)),
   ]);
 
   // The user may have switched warehouse while this was loading.
@@ -520,10 +545,10 @@ function renderOrdersBody(rows, canEdit) {
         <input type="checkbox" class="order-done-check" data-id="${o.id}" ${o.done ? "checked" : ""} ${canEdit && !o.exception_type ? "" : "disabled"} />
       </label>
       <span class="order-id">${escapeHtml(o.order_id)}</span>
-      ${items ? `<span class="order-items" title="${escapeAttr(items)}">${escapeHtml(items)}</span>` : ""}
+      ${items ? `<span class="order-items" title="${escapeHtml(items)}">${escapeHtml(items)}</span>` : ""}
       ${flagLabel ? `<span class="exception-badge">${escapeHtml(flagLabel)}</span>` : ""}
       ${movedFromLabel ? `<span class="moved-from">${escapeHtml(movedFromLabel)}</span>` : ""}
-      ${canEdit && !o.details && !o.exception_type ? `<button class="ghost add-details" data-order-id="${escapeAttr(o.order_id)}" title="Paste this order from Zagle to add its products and customer">Add details</button>` : ""}
+      ${canEdit && !o.details && !o.exception_type ? `<button class="ghost add-details" data-order-id="${escapeHtml(o.order_id)}" title="Paste this order from Zagle to add its products and customer">Add details</button>` : ""}
       <span class="time">${formatTime(o.created_at)}</span>
       ${canEdit && !o.exception_type ? `<button class="ghost icon-btn flag-incomplete" data-id="${o.id}" title="Mark incomplete" aria-label="Mark order ${escapeHtml(o.order_id)} as incomplete">${iconFlag}</button>` : ""}
       ${canEdit && o.exception_type ? `<button class="ghost icon-btn clear-exception" data-id="${o.id}" title="Clear flag" aria-label="Clear exception flag for order ${escapeHtml(o.order_id)}">${iconRotate}</button>` : ""}
@@ -554,7 +579,7 @@ function renderProductsBody(dateKey, rows, canEdit) {
       const orderList = p.orders.map((o) => (o.qty > 1 ? `${o.orderId} ×${o.qty}` : o.orderId)).join(", ");
       return `
     <div class="order-row product-row ${done ? "done" : ""}">
-      <label class="order-check" aria-label="Mark ${escapeAttr(p.name)} as ${done ? "not collected" : "collected"}">
+      <label class="order-check" aria-label="Mark ${escapeHtml(p.name)} as ${done ? "not collected" : "collected"}">
         <input type="checkbox" class="pick-check" data-idx="${idx}" ${done ? "checked" : ""} ${canEdit ? "" : "disabled"} />
       </label>
       <div class="product-main">
@@ -572,7 +597,7 @@ function renderProductsBody(dateKey, rows, canEdit) {
   const missingNote = missing.length
     ? `<p class="pick-missing">No product details for ${
         canEdit
-          ? missing.map((id) => `<button type="button" class="missing-id add-details-link" data-order-id="${escapeAttr(id)}" title="Add details">${escapeHtml(id)}</button>`).join(" ")
+          ? missing.map((id) => `<button type="button" class="missing-id add-details-link" data-order-id="${escapeHtml(id)}" title="Add details">${escapeHtml(id)}</button>`).join(" ")
           : escapeHtml(missing.join(", "))
       } (typed in manually, or captured before this update).${canEdit ? " Click an ID to paste its details from Zagle." : ""}</p>`
     : "";
@@ -648,7 +673,7 @@ function openExceptionDialog(order, root, session) {
         <input type="radio" name="exception-reason" value="another-day" />
         Dispatch on another day
       </label>
-      <input type="date" id="exception-date" style="display:none" />
+      <button type="button" id="exception-date" style="display:none">Pick a day</button>
       <label class="exception-option">
         <input type="radio" name="exception-reason" value="cancelled" />
         Cancelled
@@ -668,13 +693,19 @@ function openExceptionDialog(order, root, session) {
 
   const noteBox = overlay.querySelector("#exception-note");
   const dateBox = overlay.querySelector("#exception-date");
-  dateBox.min = todayDateKey();
+  let pickedDate = "";
+  dateBox.addEventListener("click", async () => {
+    const k = await pickDate({ value: pickedDate || null, min: todayDateKey(), title: "Dispatch on" });
+    if (!k) return;
+    pickedDate = k;
+    dateBox.textContent = formatKey(k);
+  });
   overlay.querySelectorAll('input[name="exception-reason"]').forEach((radio) => {
     radio.addEventListener("change", () => {
       const selected = overlay.querySelector('input[name="exception-reason"]:checked').value;
       noteBox.style.display = selected === "other" ? "block" : "none";
       dateBox.style.display = selected === "another-day" ? "block" : "none";
-      if (selected === "another-day") dateBox.focus();
+      if (selected === "another-day" && !pickedDate) dateBox.click();
     });
   });
 
@@ -691,7 +722,7 @@ function openExceptionDialog(order, root, session) {
       return;
     }
     if (selected === "another-day") {
-      const target = dateBox.value;
+      const target = pickedDate;
       if (!target) {
         await showAlert("Pick the day it should be dispatched.");
         return;
@@ -711,28 +742,14 @@ function openExceptionDialog(order, root, session) {
 
 async function applyException(order, type, note, root, session, targetDate = null) {
   if (type === "rescheduled") {
-    const nextDate = targetDate || addDays(order.dispatch_date, 1);
-    const { data: newOrder, error: insertError } = await supabase
-      .from("orders")
-      .insert({
-        order_id: order.order_id,
-        warehouse_id: order.warehouse_id,
-        dispatch_date: nextDate,
-        created_by: session.user.id,
-        details: order.details ?? null,
-      })
-      .select()
-      .single();
-    if (insertError) {
-      await showAlert(`Couldn't reschedule: ${insertError.message}`);
-      return;
-    }
-    const { error: updateError } = await supabase
-      .from("orders")
-      .update({ exception_type: "rescheduled", rescheduled_to_id: newOrder.id })
-      .eq("id", order.id);
-    if (updateError) {
-      await showAlert(`Couldn't flag original order: ${updateError.message}`);
+    // One database call: adds the copy on the new day and flags this one,
+    // or does neither (0015_reschedule_order.sql).
+    const { error } = await supabase.rpc("reschedule_order", {
+      p_id: order.id,
+      p_date: targetDate || addDays(order.dispatch_date, 1),
+    });
+    if (error) {
+      await showAlert(`Couldn't reschedule: ${error.message}`);
       return;
     }
   } else {
@@ -783,7 +800,8 @@ function downloadAndCopy(text, suffix) {
   a.href = url;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
+  // Safari cancels the download if the link is thrown away straight away.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 
   if (navigator.clipboard) {
     navigator.clipboard.writeText(text).catch(() => {});
@@ -798,16 +816,24 @@ function exportLine(o) {
   return `${o.order_id} - ${items.map((it) => `${it.name} x ${Number(it.qty) || 1}`).join(", ")}`;
 }
 
+// Live updates for the warehouse on screen only; re-subscribed when the
+// tab changes. Supabase can't filter deletes by column, so those are
+// listened to unfiltered (a reload of one warehouse is cheap).
+let subscribedWarehouseId = null;
 function subscribeRealtime(root, session) {
+  if (subscribedWarehouseId === activeWarehouseId && realtimeChannel) return;
   if (realtimeChannel) supabase.removeChannel(realtimeChannel);
+  subscribedWarehouseId = activeWarehouseId;
+  const filter = `warehouse_id=eq.${activeWarehouseId}`;
+  const reload = () => {
+    if (activeView === "warehouse") loadOrdersForActiveWarehouse(root, session);
+  };
   realtimeChannel = supabase
-    .channel("orders-changes")
-    .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => {
-      if (activeView === "warehouse") loadOrdersForActiveWarehouse(root, session);
-    })
-    .on("postgres_changes", { event: "*", schema: "public", table: "pick_marks" }, () => {
-      if (activeView === "warehouse") loadOrdersForActiveWarehouse(root, session);
-    })
+    .channel(`orders-${activeWarehouseId}`)
+    .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter }, reload)
+    .on("postgres_changes", { event: "*", schema: "public", table: "pick_marks", filter }, reload)
+    .on("postgres_changes", { event: "DELETE", schema: "public", table: "orders" }, reload)
+    .on("postgres_changes", { event: "DELETE", schema: "public", table: "pick_marks" }, reload)
     .subscribe();
 }
 
@@ -851,16 +877,4 @@ function saveListMode(mode) {
   } catch {
     // Private window or blocked storage: the toggle still works, it just isn't remembered.
   }
-}
-
-// escapeHtml leaves quotes alone, which is fine for text but not inside
-// an attribute value.
-function escapeAttr(str) {
-  return escapeHtml(str).replace(/"/g, "&quot;");
-}
-
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
 }

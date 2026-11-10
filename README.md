@@ -253,8 +253,14 @@ What it takes:
   pre-book batch for a product against an expected arrival date, claim
   customer orders against it as they come in, and see stock/claimed/
   available at a glance.
-- **Admin panel** (`/admin`, super_admin only) — create staff accounts,
-  assign roles/warehouses, and add warehouses, all from the UI.
+- **Admin panel** (`/admin`, owner only, no link in the app) — create and
+  remove accounts, assign roles/warehouses, add and remove warehouses.
+- **Roles** — *staff* edit their own warehouse and browse the others;
+  *super admins* edit every warehouse and see Statistics; the *owner* is a
+  super admin who also manages people and warehouses.
+- **Light / dark mode** — the sun / moon button in the top bar.
+- **Screenshots** — in "Paste order" (or pasted into the Order ID box), a
+  screenshot of a Zagle order is read on the device and filled in.
 
 ## Tech stack
 
@@ -310,11 +316,29 @@ Built with the same stack as its sibling tool,
    - `supabase/migrations/0008_fill_missing_details.sql` — completes short
      order IDs (`42420` → `WOO-42420`), and lets a later capture or a pasted
      order fill in an order that was saved with only its ID.
+   - `supabase/migrations/0009_fix_short_order_ids.sql` — one-time fix of
+     short IDs saved before 0008.
+   - `supabase/migrations/0010_lock_order_reads.sql` — only assigned
+     accounts can read orders.
+   - `supabase/migrations/0011_owner_role.sql` — the owner role (edit the
+     email in it to yours), and an index for order ID lookups.
+   - `supabase/migrations/0012_stats_parcels.sql` — parcels per warehouse
+     and orders missing details, for the Statistics tab.
+   - `supabase/migrations/0013_known_product_names.sql` — product names
+     already sold, so names read from screenshots are spelled right.
+   - `supabase/migrations/0014_extension_corrects_details.sql` — sending an
+     order again with the extension replaces details that came from a paste
+     or screenshot, instead of asking about a duplicate.
+   - `supabase/migrations/0015_reschedule_order.sql` — moving an order to
+     another day happens in one step, so it can't end up on both days.
+   - `supabase/migrations/0016_prebook_tables.sql` — the Prebook tables
+     (made by hand before), and only assigned accounts can use them.
 3. **Authentication → Users** — create an account for yourself. This
    becomes your first `super_admin`; every account after this one can be
    created from the in-app Admin panel instead.
 4. **Table editor → profiles** — for that first account, set:
    - `role` → `super_admin`
+   - `is_owner` → `true` (after running 0011)
    - `warehouse_id` → leave blank
 5. **Settings → API** — copy the **Project URL** and **anon public key**
    (you'll need both next).
@@ -367,7 +391,10 @@ dispatchez/
 │   ├── dashboard.js          # warehouse tabs, Orders / Products views
 │   ├── stats.js              # Statistics tab (filters, charts, exports)
 │   ├── statsCompute.js       # Statistics calculations (no DOM)
-│   ├── orderTextParser.js    # reads an order pasted from Zagle as text
+│   ├── orderTextParser.js    # reads an order pasted from Zagle as text (+ tests)
+│   ├── ocr.js                # reads an order screenshot (tesseract.js)
+│   ├── calendar.js           # date / date-range picker
+│   ├── topbar.js             # top bar + light/dark switch
 │   ├── prebook.js            # pre-book batches + claimed-order tracking
 │   ├── admin.js              # /admin panel (users, roles, warehouses)
 │   ├── dialogs.js            # themed alert/confirm/prompt replacements
@@ -375,6 +402,7 @@ dispatchez/
 │   ├── supabaseClient.js
 │   └── style.css
 ├── api/                      # Vercel serverless functions
+│   ├── _requireOwner.js      # shared "caller is the owner" check
 │   ├── admin-create-user.js
 │   └── admin-delete-user.js
 ├── copy-extension/           # Browser extension (Manifest v3)
@@ -386,7 +414,7 @@ dispatchez/
 │   ├── popup.html / popup.js
 │   └── config.js
 ├── docs/images/              # screenshots used in this README
-├── supabase/migrations/      # 0001 … 0008, run in order
+├── supabase/migrations/      # 0001 … 0016, run in order
 └── index.html
 ```
 

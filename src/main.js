@@ -1,8 +1,12 @@
 import "./style.css";
+import { inject } from "@vercel/analytics";
 import { supabase } from "./supabaseClient.js";
 import { renderAuthScreen } from "./auth.js";
 import { renderDashboard } from "./dashboard.js";
 import { renderAdminPanel } from "./admin.js";
+
+// Initialize Vercel Web Analytics
+inject();
 
 const root = document.getElementById("app");
 let booted = false;
